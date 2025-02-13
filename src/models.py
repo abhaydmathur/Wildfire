@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 class JustCoords(nn.Module):
     def __init__(self):
         super().__init__()
@@ -14,4 +15,3 @@ class JustCoords(nn.Module):
         x = F.relu(self.fc2(x))
         x = F.sigmoid(self.fc3(x))
         return x
-

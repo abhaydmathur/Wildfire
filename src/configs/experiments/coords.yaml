@@ -1,0 +1,16 @@
+name: "coords_only_trial"
+model_name: "just_coords"
+
+data_path: "/data/amathur-23/ROB313"
+
+learning_rate: 0.001
+batch_size: 32
+num_epochs: 10
+early_stopping_patience: 3
+early_stopping_threshold: 0.001 
+
+log_dir: "./runs"
+model_save_path: "/data/amathur-23/ROB313/models"
+
+gpu_id: 0
+seed: 42
