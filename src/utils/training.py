@@ -64,7 +64,6 @@ class Trainer():
 
         self.model_name = args.model_name
         self.epochs = args.epochs
-        self.log_interval = args.log_interval
         self.model_save_path = args.model_save_path
         self.log_dir = args.log_dir
 
@@ -109,7 +108,7 @@ class Trainer():
             labels = batch["label"].to(self.device)
 
             self.optimizer.zero_grad()
-            outputs = self.model(coords)
+            outputs = self.model(coords).squeeze()
             loss = self.criterion(outputs, labels)
             loss.backward()
             self.optimizer.step()
@@ -154,7 +153,7 @@ class Trainer():
             labels = batch["label"].to(self.device)
 
             with torch.no_grad():
-                outputs = self.model(coords)
+                outputs = self.model(coords).squeeze()
                 loss = self.criterion(outputs, labels)
                         
 
@@ -173,14 +172,27 @@ class Trainer():
                 )
         print()
 
-        f1_score = f1_score(label_list, np.round(pred_list))
+        f1 = f1_score(label_list, np.round(pred_list))
 
         info = {
             "loss": np.mean(losses),
             "acc": np.mean(accs),
-            "f1_score": f1_score,
+            "f1_score": f1,
         }
         return info
+    
+    def log_init(self):
+        train_info = self.validate(split="train")
+        val_info = self.validate(split="val")
+        test_info = self.validate(split="test")
+
+        log_train_info = {f"train/{k}": v for k, v in train_info.items()}
+        log_val_info = {f"val/{k}": v for k, v in val_info.items()}
+        log_test_info = {f"test/{k}": v for k, v in test_info.items()}
+
+        self.save_to_log(self.logger, log_train_info, 0)
+        self.save_to_log(self.logger, log_val_info, 0)
+        self.save_to_log(self.logger, log_test_info, 0)
     
     def train(self):
         self.log_init()

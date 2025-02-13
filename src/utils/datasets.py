@@ -56,15 +56,16 @@ class WildfireDataset(Dataset):
             [self.id_to_coordx[idx], self.id_to_coordy[idx]], dtype=torch.float32
         )
 
-        if self.labeled:
-            label = 1 if self.id_to_label[idx] == "wildfire" else 0
+        if self.split == "train" and not self.labeled:
             return {
                 "image": image,
-                "label": torch.tensor(label, dtype=torch.long),
                 "coords": coords,
             }
         else:
+            label = float(1 if self.id_to_label[idx] == "wildfire" else 0)
             return {
                 "image": image,
+                "label": torch.tensor(label, dtype=torch.float),
                 "coords": coords,
             }
+
