@@ -22,7 +22,7 @@ class WildfireDataset(Dataset):
     ):
         self.root_dir = root_dir
         self.split = split
-        if not labeled:
+        if not labeled and split=="train":
             self.split = self.split + "_unlabeled"
 
         self.labeled = labeled

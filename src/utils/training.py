@@ -5,13 +5,12 @@ from models import JustCoords
 import numpy as np
 from tqdm import tqdm
 import os
+from sklearn.metrics import f1_score
 
 from utils.logging import Logger
 
 class Trainer():
-
     def __init__(self, args):
-        
         self.args = args
         self.device = args.device
         self.model = JustCoords().to(self.device)
@@ -24,8 +23,12 @@ class Trainer():
 
         self.val_dataset = WildfireDataset(
             args.data_path,
-            split="val",
-            labeled=True
+            split="val"
+        )
+
+        self.test_dataset = WildfireDataset(
+            args.data_path,
+            split="test"
         )
 
         print(f"Train dataset size: {len(self.train_dataset)}")
@@ -40,6 +43,13 @@ class Trainer():
 
         self.val_loader = DataLoader(
             self.val_dataset,
+            batch_size=args.batch_size,
+            shuffle=False,
+            num_workers=4
+        )
+
+        self.test_loader = DataLoader(
+            self.test_dataset,
             batch_size=args.batch_size,
             shuffle=False,
             num_workers=4
@@ -68,9 +78,8 @@ class Trainer():
         self.best_epoch = 0
 
         self.training_history = {}
-
-    
-    def save_to_log(self, logdir, logger, info, epoch, w_summary=False, model=None):
+   
+    def save_to_log(self, logger, info, epoch, w_summary=False, model=None):
         # save scalars
         for tag, value in info.items():
             logger.scalar_summary(tag, value, epoch)
@@ -89,17 +98,92 @@ class Trainer():
                         tag + "/grad", value.grad.data.cpu().numpy(), epoch
                     )
     
-    def train_epoch(self):
-        pass
-        
+    def train_epoch(self, epoch, verbose=True):
+        self.model.train()
+        losses = []
+        accs = []
 
-    def evaluate(self):
-        pass
+        n_steps = len(self.train_loader)
+        for i, batch in enumerate(self.train_loader):
+            coords = batch["coords"].to(self.device)
+            labels = batch["label"].to(self.device)
+
+            self.optimizer.zero_grad()
+            outputs = self.model(coords)
+            loss = self.criterion(outputs, labels)
+            loss.backward()
+            self.optimizer.step()
+
+            losses.append(loss.item())
+            with torch.no_grad():
+                acc = (outputs.round() == labels).float().mean().item()
+                accs.append(acc)
+            
+            if verbose:
+                print(
+                    f"\rEpoch {epoch + 1} [{i + 1}/{n_steps}] loss: {np.mean(losses):.3f}, acc: {np.mean(accs):.3f}   ",
+                    end="",
+                )
+        print()
+
+        info = {
+            "loss": np.mean(losses),
+            "acc": np.mean(accs),
+            "lr": self.optimizer.param_groups[0]["lr"],
+        }
+        return info
+        
+    def validate(self, verbose=True, split="val"):
+        if split == "val":
+            loader = self.val_loader
+        elif split == "train":
+            loader = self.train_loader
+        elif split == "test":
+            loader = self.test_loader
+        else:
+            raise ValueError("Invalid split")
+        self.model.eval()
+        losses = []
+        accs = []
+        label_list = []
+        pred_list = []
+
+        n_steps = len(loader)
+        for i, batch in enumerate(loader):
+            coords = batch["coords"].to(self.device)
+            labels = batch["label"].to(self.device)
+
+            with torch.no_grad():
+                outputs = self.model(coords)
+                loss = self.criterion(outputs, labels)
+                        
+
+            losses.append(loss.item())
+            with torch.no_grad():
+                acc = (outputs.round() == labels).float().mean().item()
+                accs.append(acc)
+
+            label_list.extend(labels.cpu().numpy())
+            pred_list.extend(outputs.cpu().numpy())
+            
+            if verbose:
+                print(
+                    f"\rEvaluation on {split} : [{i + 1}/{n_steps}] loss: {np.mean(losses):.3f}, acc: {np.mean(accs):.3f}   ",
+                    end="",
+                )
+        print()
+
+        f1_score = f1_score(label_list, np.round(pred_list))
+
+        info = {
+            "loss": np.mean(losses),
+            "acc": np.mean(accs),
+            "f1_score": f1_score,
+        }
+        return info
     
     def train(self):
         self.log_init()
-
-        self.model.train()
 
         for epoch in range(self.epochs):
             epoch_info = self.train_epoch()
@@ -145,12 +229,12 @@ class Trainer():
                 break
 
             if (epoch + 1) % self.args.test_freq == 0:
-                test_info = self.test()
+                test_info = self.validate(split="test")
                 for loader_name in test_info.keys():
                     log_test_info = {f"test/{loader_name}/{k}": v for k, v in test_info[loader_name].items()}
                     self.save_to_log(self.args.log_dir, self.logger, log_test_info, epoch+1)
 
-        test_info = self.test()
+        test_info = self.validate(split='test')
         log_test_info = {f"test/{k}": v for k, v in test_info.items()}
         self.save_to_log(self.args.log_dir, self.logger, log_test_info, epoch+1)
 
@@ -163,7 +247,7 @@ class Trainer():
         return False
 
     def run_tests(self):
-        test_info = self.test()
+        test_info = self.validate(split="test")
         print(test_info)
         log_test_info = {f"test/{k}": v for k, v in test_info.items()}
         self.save_to_log(self.args.log_dir, self.logger, log_test_info, 1)

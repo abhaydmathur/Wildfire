@@ -12,7 +12,7 @@ def get_args():
     parser.add_argument("--config", type=str, default="config.yaml", help="Path to the config file")
 
     args = parser.parse_args()
-    with open(args.config_file, "r") as f:
+    with open(args.config, "r") as f:
         config = yaml.safe_load(f)
     return argparse.Namespace(**config)
 
@@ -40,3 +40,5 @@ def main():
     trainer = Trainer(args)
     trainer.train()
 
+if __name__ == "__main__":
+    main()
