@@ -78,7 +78,7 @@ class Trainer():
 
         self.training_history = {}
    
-    def save_to_log(self, logger, info, epoch, w_summary=False, model=None):
+    def save_to_log(self, logdir, logger, info, epoch, w_summary=False, model=None):
         # save scalars
         for tag, value in info.items():
             logger.scalar_summary(tag, value, epoch)
@@ -190,15 +190,15 @@ class Trainer():
         log_val_info = {f"val/{k}": v for k, v in val_info.items()}
         log_test_info = {f"test/{k}": v for k, v in test_info.items()}
 
-        self.save_to_log(self.logger, log_train_info, 0)
-        self.save_to_log(self.logger, log_val_info, 0)
-        self.save_to_log(self.logger, log_test_info, 0)
+        self.save_to_log(self.args.log_dir, self.logger, log_train_info, 0)
+        self.save_to_log(self.args.log_dir, self.logger, log_val_info, 0)
+        self.save_to_log(self.args.log_dir, self.logger, log_test_info, 0)
     
     def train(self):
         self.log_init()
 
         for epoch in range(self.epochs):
-            epoch_info = self.train_epoch()
+            epoch_info = self.train_epoch(epoch)
 
             log_epoch_info = {f"train/{k}": v for k, v in epoch_info.items()}
             self.save_to_log(self.args.log_dir, self.logger, log_epoch_info, epoch + 1)
@@ -211,6 +211,8 @@ class Trainer():
                 "train": epoch_info,
                 "val": val_info,
             }
+
+            os.makedirs(self.model_save_path, exist_ok=True)
 
             # Save best and latest models
             if (
@@ -227,10 +229,6 @@ class Trainer():
                 try:
                     os.remove(self.latest_model_path)
                 except:
-                    try:
-                        self.model.remove(self.latest_model_path)
-                    except:
-                        print(".")
                     print("Could not remove latest model")
             self.latest_model_path = os.path.join(
                 self.model_save_path, f"latest_model_{epoch+1}eps.pth"
@@ -242,9 +240,8 @@ class Trainer():
 
             if (epoch + 1) % self.args.test_freq == 0:
                 test_info = self.validate(split="test")
-                for loader_name in test_info.keys():
-                    log_test_info = {f"test/{loader_name}/{k}": v for k, v in test_info[loader_name].items()}
-                    self.save_to_log(self.args.log_dir, self.logger, log_test_info, epoch+1)
+                log_test_info = {f"test/{k}": v for k, v in test_info.items()}
+                self.save_to_log(self.args.log_dir, self.logger, log_test_info, epoch+1)
 
         test_info = self.validate(split='test')
         log_test_info = {f"test/{k}": v for k, v in test_info.items()}
@@ -257,6 +254,9 @@ class Trainer():
                 print(f"Early Stopping after {epoch} epochs")
                 return True
         return False
+
+    def save(self, path):
+        torch.save(self.model.state_dict(), path)
 
     def run_tests(self):
         test_info = self.validate(split="test")

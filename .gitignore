@@ -189,3 +189,7 @@ data/
 *.fdb_latexmk
 *.snm
 *.nav
+
+# 
+runs/
+src/runs/
