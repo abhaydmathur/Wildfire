@@ -36,6 +36,9 @@ def main():
     train_labeled_files = val_files[:split_idx]
     val_files_labeled = val_files[split_idx:]
 
+    print(f"Number of train labeled files: {len(train_labeled_files)}")
+    print(f"Number of val labeled files: {len(val_files_labeled)}")
+
     train_unlabeled = {
         'filename': [],
         'coord_x': [],
@@ -63,7 +66,7 @@ def main():
         train_labeled['coord_y'].append(coord_y)
         train_labeled['label'].append(label)
     train_labeled_df = pd.DataFrame(train_labeled)
-    train_labeled_df.to_csv(f'{root_dir}/train_labeled.csv', index=False)
+    train_labeled_df.to_csv(f'{root_dir}/train.csv', index=False)
 
     val_labeled = {
         'filename': [],
@@ -79,7 +82,7 @@ def main():
         val_labeled['label'].append(label)
 
     val_labeled_df = pd.DataFrame(val_labeled)
-    val_labeled_df.to_csv(f'{root_dir}/val_labeled.csv', index=False)
+    val_labeled_df.to_csv(f'{root_dir}/val.csv', index=False)
 
     test = {
         'filename': [],

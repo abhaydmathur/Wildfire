@@ -21,11 +21,16 @@ class WildfireDataset(Dataset):
         self.root_dir = root_dir
         self.split = split
         if not labeled:
-            self.split = split + '_unlabeled'
+            self.split = self.split + '_unlabeled'
 
         self.labeled = labeled
 
-        meta_file = f'{root_dir}/{split}.csv'
+
+
+        meta_file = f'{root_dir}/{self.split}.csv'
+
+        print(f"Loading meta file: {meta_file}")
+
         self.meta = pd.read_csv(meta_file)
         self.meta = self.meta.dropna().drop_duplicates()
 
