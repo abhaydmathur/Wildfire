@@ -7,7 +7,7 @@ from tqdm import tqdm
 import os
 from sklearn.metrics import f1_score
 
-from utils.logging import Logger
+from utils.logging_tb import Logger
 
 class Trainer():
     def __init__(self, args):
