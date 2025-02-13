@@ -25,7 +25,7 @@ class WildfireDataset(Dataset):
         if not labeled and split=="train":
             self.split = self.split + "_unlabeled"
 
-        self.labeled = labeled
+        self.labeled = labeled if split=="train" else True
 
         meta_file = f"{root_dir}/{self.split}.csv"
 
