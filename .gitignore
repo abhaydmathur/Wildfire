@@ -169,3 +169,23 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+
+# env
+src/fyre/
+
+# data
+data/
+
+# Latex auxiliary files
+*.bbl
+*.blg
+*.brf
+*.fls
+*.out
+*.run.xml
+*.synctex.gz
+*.toc
+*.fdb_latexmk
+*.snm
+*.nav
