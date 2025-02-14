@@ -1,0 +1,22 @@
+trial_name: "resnet_classifier_trial"
+model_name: "resnet_classifier"
+
+backbone: "resnet50"
+pretrained: True
+train_backbone: False
+
+data_path: "/data/amathur-23/ROB313"
+
+learning_rate: 0.001
+batch_size: 32
+epochs: 20
+early_stopping_patience: 5
+early_stopping_threshold: 0.001 
+
+log_dir: "./runs"
+model_save_path: "/data/amathur-23/ROB313/models"
+
+gpu_id: 1
+seed: 42
+
+test_freq: 5

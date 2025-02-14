@@ -42,7 +42,7 @@ def main():
     seed_everything(args.seed)
     args.device = f"cuda:{args.gpu_id}" if torch.cuda.is_available() else "cpu"
 
-    trainer = Trainer(args) if args.model_name == "just_coords" else SimCLRTrainer(args)
+    trainer = Trainer(args) if args.model_name in ["just_coords", "resnet_classifier"] else SimCLRTrainer(args)
     trainer.train()
 
 

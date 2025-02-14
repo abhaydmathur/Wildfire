@@ -1,7 +1,7 @@
 import torch
 from torch.utils.data import DataLoader
 from utils.datasets import WildfireDataset
-from models import JustCoords, ResNet50
+from models import JustCoords, ResNetEncoder, ResNetBinaryClassifier
 import numpy as np
 from tqdm import tqdm
 import os
@@ -20,7 +20,6 @@ class Trainer:
     def __init__(self, args):
         self.args = args
         self.device = args.device
-        self.model = JustCoords().to(self.device)
 
         self.train_dataset = WildfireDataset(
             args.data_path, split="train", labeled=True
@@ -32,6 +31,7 @@ class Trainer:
 
         print(f"Train dataset size: {len(self.train_dataset)}")
         print(f"Val dataset size: {len(self.val_dataset)}")
+        print(f"Test dataset size: {len(self.test_dataset)}")
 
         self.train_loader = DataLoader(
             self.train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4
@@ -45,16 +45,30 @@ class Trainer:
             self.test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4
         )
 
+        self.model_name = args.model_name
+        self.epochs = args.epochs
+        self.model_save_path = args.model_save_path
+        self.log_dir = args.log_dir
+
+        if self.model_name == "resnet_classifier":
+            self.model = ResNetBinaryClassifier(
+                backbone=args.backbone,
+                pretrained=args.pretrained,
+                train_backbone=args.train_backbone,
+            ).to(self.device)
+
+        elif self.model_name == "just_coords":
+            self.model = JustCoords().to(self.device)
+
+        else:
+            raise NotImplementedError("Model not implemented")
+        
+
         self.optimizer = torch.optim.Adam(
             self.model.parameters(), lr=args.learning_rate
         )
 
         self.criterion = torch.nn.BCELoss()
-
-        self.model_name = args.model_name
-        self.epochs = args.epochs
-        self.model_save_path = args.model_save_path
-        self.log_dir = args.log_dir
 
         self.log_path = os.path.join(args.log_dir, self.args.trial_name)
         os.makedirs(self.log_path, exist_ok=True)
@@ -96,8 +110,16 @@ class Trainer:
             coords = batch["coords"].to(self.device)
             labels = batch["label"].to(self.device)
 
+            if self.model_name == "resnet_classifier":
+                images = batch["image"].to(self.device)
+                inputs = images
+            elif self.model_name == "just_coords":
+                inputs = coords
+            else:
+                raise NotImplementedError("Model not implemented")
+
             self.optimizer.zero_grad()
-            outputs = self.model(coords).squeeze()
+            outputs = self.model(inputs).squeeze()
             loss = self.criterion(outputs, labels)
             loss.backward()
             self.optimizer.step()
@@ -141,8 +163,16 @@ class Trainer:
             coords = batch["coords"].to(self.device)
             labels = batch["label"].to(self.device)
 
+            if self.model_name == "resnet_classifier":
+                images = batch["image"].to(self.device)
+                inputs = images
+            elif self.model_name == "just_coords":
+                inputs = coords
+            else:
+                raise NotImplementedError("Model not implemented")
+
             with torch.no_grad():
-                outputs = self.model(coords).squeeze()
+                outputs = self.model(inputs).squeeze()
                 loss = self.criterion(outputs, labels)
 
             losses.append(loss.item())
@@ -276,7 +306,7 @@ class SimCLRTrainer:
             self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=4
         )
 
-        self.model = ResNet50(
+        self.model = ResNetEncoder(
             out_features=128,
             pretrained=self.args.pretrained,
             train_backbone=self.args.train_backbone,
@@ -318,11 +348,46 @@ class SimCLRTrainer:
 
         return loss
 
-    def train(self):
+    def validate(self):
+        losses = []
 
+        num_steps = len(self.train_loader)
+        for i, batch in enumerate(self.train_loader):
+            # print(batch['image'].shape)
+            with torch.no_grad():
+                images = torch.cat(list(batch["image"]), dim=0)
+                images = images.to(self.device)
+
+                with autocast(
+                    device_type="cuda", dtype=torch.float16
+                ):  # to improve performance while maintaining accuracy.
+                    # with autocast():
+                    features = self.model(images)
+                    loss = self.info_nce_loss(features)
+
+                losses.append(loss.item())
+
+            print(
+                f"\rEvaluation ({i}/{num_steps}), Average loss: {np.mean(losses):.4f}, lr: {self.scheduler.get_last_lr()[0]:.4f}",
+                end="",
+            )
+
+        print(
+            f"\rEvaluation ({i}/{num_steps}), Average loss: {np.mean(losses):.4f}, lr: {self.scheduler.get_last_lr()[0]:.4f}",
+        )
+
+        return {"loss": np.mean(losses)}
+    
+    def init_logs(self):
+        info = self.validate()
+        log_info = {f"train/{k}": v for k, v in info.items()}
+        self.save_to_log(self.args.log_dir, self.logger, log_info, 0)
+
+    def train(self):
+    
+        self.init_logs()
         self.scaler = GradScaler()  # gradient scaling, useful when we use float16
 
-        n_iter = 0
         print("Start SimCLR training for {} epochs.".format(self.epochs))
         losses = []
 
