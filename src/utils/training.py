@@ -1,7 +1,7 @@
 import torch
 from torch.utils.data import DataLoader
 from utils.datasets import WildfireDataset
-from models import JustCoords
+from models import JustCoords, ResNet50
 import numpy as np
 from tqdm import tqdm
 import os
@@ -9,55 +9,44 @@ from sklearn.metrics import f1_score
 
 from utils.logging_tb import Logger
 
-class Trainer():
+from sklearn.metrics.pairwise import cosine_similarity
+import torch.nn.functional as F
+from torch.amp import GradScaler, autocast
+
+from utils.augmentations import ContrastiveTransformations
+
+
+class Trainer:
     def __init__(self, args):
         self.args = args
         self.device = args.device
         self.model = JustCoords().to(self.device)
 
         self.train_dataset = WildfireDataset(
-            args.data_path,
-            split="train",
-            labeled=True
+            args.data_path, split="train", labeled=True
         )
 
-        self.val_dataset = WildfireDataset(
-            args.data_path,
-            split="val"
-        )
+        self.val_dataset = WildfireDataset(args.data_path, split="val")
 
-        self.test_dataset = WildfireDataset(
-            args.data_path,
-            split="test"
-        )
+        self.test_dataset = WildfireDataset(args.data_path, split="test")
 
         print(f"Train dataset size: {len(self.train_dataset)}")
         print(f"Val dataset size: {len(self.val_dataset)}")
 
         self.train_loader = DataLoader(
-            self.train_dataset,
-            batch_size=args.batch_size,
-            shuffle=True,
-            num_workers=4
+            self.train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4
         )
 
         self.val_loader = DataLoader(
-            self.val_dataset,
-            batch_size=args.batch_size,
-            shuffle=False,
-            num_workers=4
+            self.val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4
         )
 
         self.test_loader = DataLoader(
-            self.test_dataset,
-            batch_size=args.batch_size,
-            shuffle=False,
-            num_workers=4
+            self.test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4
         )
 
         self.optimizer = torch.optim.Adam(
-            self.model.parameters(),
-            lr=args.learning_rate
+            self.model.parameters(), lr=args.learning_rate
         )
 
         self.criterion = torch.nn.BCELoss()
@@ -67,7 +56,7 @@ class Trainer():
         self.model_save_path = args.model_save_path
         self.log_dir = args.log_dir
 
-        self.log_path = os.path.join(args.log_dir, self.model_name)
+        self.log_path = os.path.join(args.log_dir, self.args.trial_name)
         os.makedirs(self.log_path, exist_ok=True)
         self.logger = Logger(self.log_path)
 
@@ -77,7 +66,7 @@ class Trainer():
         self.best_epoch = 0
 
         self.training_history = {}
-   
+
     def save_to_log(self, logdir, logger, info, epoch, w_summary=False, model=None):
         # save scalars
         for tag, value in info.items():
@@ -96,7 +85,7 @@ class Trainer():
                     logger.histo_summary(
                         tag + "/grad", value.grad.data.cpu().numpy(), epoch
                     )
-    
+
     def train_epoch(self, epoch, verbose=True):
         self.model.train()
         losses = []
@@ -117,7 +106,7 @@ class Trainer():
             with torch.no_grad():
                 acc = (outputs.round() == labels).float().mean().item()
                 accs.append(acc)
-            
+
             if verbose:
                 print(
                     f"\rEpoch {epoch + 1} [{i + 1}/{n_steps}] loss: {np.mean(losses):.3f}, acc: {np.mean(accs):.3f}   ",
@@ -131,7 +120,7 @@ class Trainer():
             "lr": self.optimizer.param_groups[0]["lr"],
         }
         return info
-        
+
     def validate(self, verbose=True, split="val"):
         if split == "val":
             loader = self.val_loader
@@ -155,7 +144,6 @@ class Trainer():
             with torch.no_grad():
                 outputs = self.model(coords).squeeze()
                 loss = self.criterion(outputs, labels)
-                        
 
             losses.append(loss.item())
             with torch.no_grad():
@@ -164,7 +152,7 @@ class Trainer():
 
             label_list.extend(labels.cpu().numpy())
             pred_list.extend(outputs.cpu().numpy())
-            
+
             if verbose:
                 print(
                     f"\rEvaluation on {split} : [{i + 1}/{n_steps}] loss: {np.mean(losses):.3f}, acc: {np.mean(accs):.3f}   ",
@@ -180,7 +168,7 @@ class Trainer():
             "f1_score": f1,
         }
         return info
-    
+
     def log_init(self):
         train_info = self.validate(split="train")
         val_info = self.validate(split="val")
@@ -193,7 +181,7 @@ class Trainer():
         self.save_to_log(self.args.log_dir, self.logger, log_train_info, 0)
         self.save_to_log(self.args.log_dir, self.logger, log_val_info, 0)
         self.save_to_log(self.args.log_dir, self.logger, log_test_info, 0)
-    
+
     def train(self):
         self.log_init()
 
@@ -241,11 +229,13 @@ class Trainer():
             if (epoch + 1) % self.args.test_freq == 0:
                 test_info = self.validate(split="test")
                 log_test_info = {f"test/{k}": v for k, v in test_info.items()}
-                self.save_to_log(self.args.log_dir, self.logger, log_test_info, epoch+1)
+                self.save_to_log(
+                    self.args.log_dir, self.logger, log_test_info, epoch + 1
+                )
 
-        test_info = self.validate(split='test')
+        test_info = self.validate(split="test")
         log_test_info = {f"test/{k}": v for k, v in test_info.items()}
-        self.save_to_log(self.args.log_dir, self.logger, log_test_info, epoch+1)
+        self.save_to_log(self.args.log_dir, self.logger, log_test_info, epoch + 1)
 
     def execute_callbacks(self, epoch):
         # Early Stopping
@@ -263,3 +253,140 @@ class Trainer():
         print(test_info)
         log_test_info = {f"test/{k}": v for k, v in test_info.items()}
         self.save_to_log(self.args.log_dir, self.logger, log_test_info, 1)
+
+
+class SimCLRTrainer:
+
+    def __init__(self, args):
+        self.args = args
+        self.device = self.args.device
+        self.temperature = self.args.temperature
+        self.batch_size = self.args.batch_size
+        self.epochs = self.args.epochs
+        self.transforms = ContrastiveTransformations(img_size=350)
+
+        self.train_dataset = WildfireDataset(
+            self.args.data_path,
+            split="train",
+            labeled=False,
+            transforms=self.transforms,
+        )
+
+        self.train_loader = DataLoader(
+            self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=4
+        )
+
+        self.model = ResNet50(
+            out_features=128,
+            pretrained=self.args.pretrained,
+            train_backbone=self.args.train_backbone,
+        )
+
+        self.optimizer = torch.optim.Adam(
+            self.model.parameters(),
+            lr=self.args.learning_rate,
+            weight_decay=self.args.weight_decay,
+        )
+        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            self.optimizer, T_max=len(self.train_loader), eta_min=0, last_epoch=-1
+        )
+
+        self.model = self.model.to(self.device)
+
+        self.log_dir = os.path.join(self.args.log_dir, self.args.trial_name)
+        os.makedirs(self.log_dir, exist_ok=True)
+        self.logger = Logger(self.log_dir)
+
+        self.model_save_path = os.path.join(self.args.model_save_path, self.args.trial_name)
+        os.makedirs(self.model_save_path, exist_ok=True)
+
+    def info_nce_loss(self, features):
+        # print(features)
+        cos_sim = F.cosine_similarity(
+            features[:, None, :], features[None, :, :], dim=-1
+        )
+
+        # Mask out the positive samples
+        self_mask = torch.eye(cos_sim.shape[0], dtype=torch.bool, device=cos_sim.device)
+        cos_sim.masked_fill_(self_mask, -9e15)
+        # Find positive example -> batch_size//2 away from the original example
+        pos_mask = self_mask.roll(shifts=cos_sim.shape[0] // 2, dims=0)
+
+        cos_sim = cos_sim / self.temperature
+        loss = -cos_sim[pos_mask] + torch.logsumexp(cos_sim, dim=-1)
+        loss = loss.mean()
+
+        return loss
+
+    def train(self):
+
+        self.scaler = GradScaler()  # gradient scaling, useful when we use float16
+
+        n_iter = 0
+        print("Start SimCLR training for {} epochs.".format(self.epochs))
+        losses = []
+
+        for epoch in range(self.epochs):
+            info = self.train_epoch(epoch)
+            losses.append(info["loss"])
+
+            log_info = {f"train/{k}": v for k, v in info.items()}
+            self.save_to_log(self.args.log_dir, self.logger, log_info, epoch + 1)
+
+            if losses[-1] <= np.min(losses):
+                print("Saving best model at epoch {}".format(epoch))
+                
+                torch.save(
+                    self.model.state_dict(),
+                    os.path.join(
+                        self.model_save_path, "simclr_model.pth"
+                    ),
+                )
+
+            if len(losses) - np.argmin(losses) > self.args.early_stopping_patience:
+                print(f"Early stopping after {epoch} epochs")
+                break
+
+    def save_to_log(self, logdir, logger, info, epoch, w_summary=False, model=None):
+        # save scalars
+        for tag, value in info.items():
+            logger.scalar_summary(tag, value, epoch)
+
+    def train_epoch(self, epoch):
+        losses = []
+
+        num_steps = len(self.train_loader)
+        for i, batch in enumerate(self.train_loader):
+            # print(batch['image'].shape)
+            images = torch.cat(list(batch["image"]), dim=0)
+            images = images.to(self.device)
+
+            with autocast(
+                device_type="cuda", dtype=torch.float16
+            ):  # to improve performance while maintaining accuracy.
+                # with autocast():
+                features = self.model(images)
+                loss = self.info_nce_loss(features)
+
+            losses.append(loss.item())
+
+            self.optimizer.zero_grad()
+
+            self.scaler.scale(loss).backward()
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+
+            print(
+                f"\rEpoch: [{epoch}/{self.epochs}] ({i}/{num_steps}), Average loss: {np.mean(losses):.4f}, lr: {self.scheduler.get_last_lr()[0]:.4f}",
+                end="",
+            )
+
+        # warmup for the first 10 epochs
+        if epoch >= 5:
+            self.scheduler.step()
+
+        print(
+            f"\rEpoch: [{epoch}/{self.epochs}] ({i}/{num_steps}), Average loss: {np.mean(losses):.4f}, lr: {self.scheduler.get_last_lr()[0]:.4f}",
+        )
+
+        return {"loss": np.mean(losses)}

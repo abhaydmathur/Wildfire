@@ -1,0 +1,22 @@
+trial_name: "simclr_trial"
+model_name: "sim_clr"
+
+data_path: "/data/amathur-23/ROB313"
+
+temperature: 0.07
+learning_rate: 0.001
+batch_size: 16
+epochs: 30
+early_stopping_patience: 5
+early_stopping_threshold: 0.001 
+
+log_dir: "./runs"
+model_save_path: "/data/amathur-23/ROB313/models"
+
+gpu_id: 0
+seed: 42
+
+test_freq: 5
+pretrained: true
+weight_decay: 0.0001
+train_backbone: true 

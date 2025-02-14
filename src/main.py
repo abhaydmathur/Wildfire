@@ -5,16 +5,20 @@ import torch
 import random
 import numpy as np
 
-from utils.training import Trainer
+from utils.training import Trainer, SimCLRTrainer
+
 
 def get_args():
     parser = argparse.ArgumentParser("Train a model on Wildfire Dataset")
-    parser.add_argument("--config", type=str, default="config.yaml", help="Path to the config file")
+    parser.add_argument(
+        "--config", type=str, default="config.yaml", help="Path to the config file"
+    )
 
     args = parser.parse_args()
     with open(args.config, "r") as f:
         config = yaml.safe_load(f)
     return argparse.Namespace(**config)
+
 
 def seed_everything(seed):
     """fix the seed for reproducibility."""
@@ -28,17 +32,19 @@ def seed_everything(seed):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = True
 
+
 def main():
     args = get_args()
 
     print(f"Using config: {args}")
-    
+
     os.environ["HF_HOME"] = "/data/amathur-23/cache/"
     seed_everything(args.seed)
     args.device = f"cuda:{args.gpu_id}" if torch.cuda.is_available() else "cpu"
 
-    trainer = Trainer(args)
+    trainer = Trainer(args) if args.model_name == "just_coords" else SimCLRTrainer(args)
     trainer.train()
+
 
 if __name__ == "__main__":
     main()

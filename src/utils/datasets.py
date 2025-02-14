@@ -19,14 +19,15 @@ class WildfireDataset(Dataset):
         root_dir,
         split="train",
         labeled=False,
+        transforms=None,
     ):
         self.root_dir = root_dir
         self.split = split
-        if not labeled and split=="train":
+        if not labeled and split == "train":
             self.split = self.split + "_unlabeled"
 
         self.labeled = labeled
-        if self.split!="train_unlabeled":
+        if self.split != "train_unlabeled":
             self.labeled = True
 
         meta_file = f"{root_dir}/{self.split}.csv"
@@ -43,7 +44,7 @@ class WildfireDataset(Dataset):
         self.id_to_coordx = dict(zip(ids, self.meta["coord_x"].values))
         self.id_to_coordy = dict(zip(ids, self.meta["coord_y"].values))
 
-        # print(self.split, self.labeled)
+        self.transforms = transforms
 
     def load_image(self, path):
         try:
@@ -64,7 +65,10 @@ class WildfireDataset(Dataset):
             [self.id_to_coordx[idx], self.id_to_coordy[idx]], dtype=torch.float32
         )
 
-        if self.split=="train_unlabeled":
+        if self.transforms:
+            image = self.transforms(image)
+
+        if self.split == "train_unlabeled":
             return {
                 "image": image,
                 "coords": coords,
@@ -76,4 +80,3 @@ class WildfireDataset(Dataset):
                 "label": torch.tensor(label, dtype=torch.float),
                 "coords": coords,
             }
-
