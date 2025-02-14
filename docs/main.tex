@@ -13,9 +13,10 @@
 \usepackage{microtype}      % microtypography
 \usepackage{lipsum}
 \usepackage{graphicx}
+\usepackage{booktabs, multirow} 
 \graphicspath{{media/}}     % organize your images and other figures under media/ folder
 
-  
+
 %% Title
 \title{We Didn't Start The Fire
 %%%% Cite as
@@ -35,111 +36,78 @@
 \begin{document}
 \maketitle
 
-
 \begin{abstract}
-\lipsum[1]
+  \lipsum[1]
 \end{abstract}
-
 
 % keywords can be removed
 \keywords{First keyword \and Second keyword \and More}
 
+\section{Introduction: Problem Statement}
+This project aims to develop a fire detection system using a designated
+dataset. The dataset consists of three subsets: a training set, a validation
+set, and a test set. Specific constraints and guidelines must be strictly
+followed to ensure compliance with the project requirements.
 
-\section{Introduction}
-\lipsum[2]
-\lipsum[3]
+\subsection{Dataset Access and Constraints}
 
+The dataset is available for download at
+\url{https://www.kaggle.com/datasets/abdelghaniaaba/wildfire-prediction-dataset/code}.
+It comprises a training set, a validation set, and a test set. A critical
+restriction is imposed on the training set: its labels are inaccessible. Any
+direct utilization of annotations from the training set will lead to
+disqualification.
 
-\section{Headings: first level}
-\label{sec:headings}
+\subsection{Dataset Partitioning}
 
-\lipsum[4] See Section \ref{sec:headings}.
+To facilitate model training, the original validation set must be partitioned
+into a newly defined validation set and a new training set. The original
+training set may be leveraged in a creative manner; however, its labels must
+not be employed under any circumstances.
 
-\subsection{Headings: second level}
-\lipsum[5]
-\begin{equation}
-\xi _{ij}(t)=P(x_{t}=i,x_{t+1}=j|y,v,w;\theta)= {\frac {\alpha _{i}(t)a^{w_t}_{ij}\beta _{j}(t+1)b^{v_{t+1}}_{j}(y_{t+1})}{\sum _{i=1}^{N} \sum _{j=1}^{N} \alpha _{i}(t)a^{w_t}_{ij}\beta _{j}(t+1)b^{v_{t+1}}_{j}(y_{t+1})}}
-\end{equation}
+\subsection{Model Development}
 
-\subsubsection{Headings: third level}
-\lipsum[6]
+A deep neural network (DNN) will be trained utilizing the newly defined
+training and validation sets. Various methodologies and supplementary resources
+may be incorporated to enhance model performance, provided that all constraints
+related to annotation usage are rigorously upheld.
 
-\paragraph{Paragraph}
-\lipsum[7]
+\section{Method}\label{sec:method}
 
-\section{Examples of citations, figures, tables, references}
-\label{sec:others}
-\lipsum[8] \cite{kour2014real,kour2014fast} and see \cite{hadash2018estimate}.
+\subsection{Dataset Analysis}
+\dots
 
-The documentation for \verb+natbib+ may be found at
-\begin{center}
-  \url{http://mirrors.ctan.org/macros/latex/contrib/natbib/natnotes.pdf}
-\end{center}
-Of note is the command \verb+\citet+, which produces citations
-appropriate for use in inline text.  For example,
-\begin{verbatim}
-   \citet{hasselmo} investigated\dots
-\end{verbatim}
-produces
-\begin{quote}
-  Hasselmo, et al.\ (1995) investigated\dots
-\end{quote}
+\subsection{Proposition 1: Using Available Labeled Data}
+\subsubsection{Naive Coordinates Classifier}
+\dots
 
-\begin{center}
-  \url{https://www.ctan.org/pkg/booktabs}
-\end{center}
+\subsubsection{ResNet Classifier}
+\dots
 
+\subsection{Self-Supervision (Learning from Unlabeled Data)}
 
-\subsection{Figures}
-\lipsum[10] 
-See Figure \ref{fig:fig1}. Here is how you add footnotes. \footnote{Sample of the first footnote.}
-\lipsum[11] 
+\subsection{SimCLR}
+Just wanted to cite this paper~\cite{simclr}.
 
-\begin{figure}
-  \centering
-  \fbox{\rule[-.5cm]{4cm}{4cm} \rule[-.5cm]{4cm}{0cm}}
-  \caption{Sample figure caption.}
-  \label{fig:fig1}
-\end{figure}
-
-\subsection{Tables}
-\lipsum[12]
-See awesome Table~\ref{tab:table}.
-
-\begin{table}
- \caption{Sample table title}
-  \centering
-  \begin{tabular}{lll}
-    \toprule
-    \multicolumn{2}{c}{Part}                   \\
-    \cmidrule(r){1-2}
-    Name     & Description     & Size ($\mu$m) \\
-    \midrule
-    Dendrite & Input terminal  & $\sim$100     \\
-    Axon     & Output terminal & $\sim$10      \\
-    Soma     & Cell body       & up to $10^6$  \\
+\begin{table}[!htp]\centering
+  \caption{Comparisons}\label{tab: }
+  \scriptsize
+  \begin{tabular}{lrrrr}\toprule
+                                               & \textbf{Model}  & \textbf{Accuracy} & \textbf{F1 Score} \\\cmidrule{2-4}
+    \multirow{2}{*}{\textbf{No pre-training}}  & Coords Only     & 0.855             & 0.873             \\ %\cmidrule{2-4}
+                                               & ResNet50        & 0.985             & 0.986             \\\cmidrule{1-4}
+    \multirow{3}{*}{\textbf{Self-Supervision}} & SimCLR+ResNet50 & ---               & ---               \\ %\cmidrule{2-4}
+                                               & VAE             & ---               & ---               \\ %\cmidrule{2-4}
+                                               & Something Else  & ---               & ---               \\\midrule
     \bottomrule
   \end{tabular}
-  \label{tab:table}
 \end{table}
-
-\subsection{Lists}
-\begin{itemize}
-\item Lorem ipsum dolor sit amet
-\item consectetur adipiscing elit. 
-\item Aliquam dignissim blandit est, in dictum tortor gravida eget. In ac rutrum magna.
-\end{itemize}
-
 
 \section{Conclusion}
 Your conclusion here
 
-\section*{Acknowledgments}
-This was was supported in part by......
-
 %Bibliography
-\bibliographystyle{unsrt}  
-\bibliography{references}  
-
+\bibliographystyle{unsrt}
+\bibliography{references}
 
 \end{document}
