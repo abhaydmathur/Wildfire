@@ -1,11 +1,11 @@
-trial_name: "vae_trial"
+trial_name: "vae_trial_test"
 model_name: "vae"
 
 data_path: "/data/amathur-23/ROB313"
 
 learning_rate: 0.00001
 batch_size: 64
-epochs: 30
+epochs: 50
 learning_rate_classifier: 0.0001
 epochs_classifier: 20
 early_stopping_patience: 5

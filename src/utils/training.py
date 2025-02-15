@@ -466,6 +466,7 @@ class VAETrainer:
         self.device = self.args.device
         self.batch_size = self.args.batch_size
         self.epochs = self.args.epochs
+        self.epochs_classifier = self.args.epochs_classifier
         self.latent_dim = self.args.latent_dim
         
         self.transforms = transforms.Compose([
@@ -494,6 +495,10 @@ class VAETrainer:
 
         self.train_loader = DataLoader(
             self.train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4
+        )
+        
+        self.train_loader_labeled = DataLoader(
+            self.train_dataset_labeled, batch_size=args.batch_size, shuffle=True, num_workers=4
         )
 
         self.val_loader = DataLoader(
@@ -549,6 +554,8 @@ class VAETrainer:
         self.train_vae()
         self.train_classifier()
         self.validate_classifier()
+        self.validate_classifier(split="test")
+        
     
     def train_vae(self):
         self.init_logs()
@@ -630,13 +637,12 @@ class VAETrainer:
 
         return {"loss": np.mean(losses)}
     
-    def train_classifier(self,):
-        self.init_logs()
+    def train_classifier(self):
         print("Start VAE Classifier training for {} epochs.".format(self.epochs_classifier))
         losses = []
         
         for epoch in range(self.epochs_classifier):
-            info = self.train_classifier(epoch)
+            info = self.train_classifier_epoch(epoch)
             losses.append(info["loss"])
             
             log_info = {f"train_classfier/{k}": v for k, v in info.items()}
@@ -655,47 +661,84 @@ class VAETrainer:
                 print(f"Early stopping after {epoch} epochs")
                 break
     
-    def train_classifier_epoch(self,):
+    def train_classifier_epoch(self, epoch):
         self.classifier.train()
         correct = 0
         total = 0
         losses = []
 
-        for batch in self.train_dataset_labeled:
-            target = batch['label'].float().to(self.device)  # Move labels to the correct device
+        num_steps = len(self.train_loader_labeled)
+        for i, batch in enumerate(self.train_loader_labeled):
+        
+            target = batch["label"].float().to(self.device) 
 
             self.classification_optimizer.zero_grad()
-            output = self.classifier(batch).squeeze()  # Ensure shape consistency
-
+            
+                
+            output = self.classifier(batch).squeeze()  
             loss = self.classification_criterion(output, target)
             loss.backward()
             self.classification_optimizer.step()
 
             losses.append(loss.item())
-            predicted = (output > 0.5).float()  # Binary classification threshold
+            predicted = (output > 0.5).float() 
             correct += (predicted == target).sum().item()
             total += target.size(0)
+            
+            print(
+                f"\rEpoch: [{epoch}/{self.epochs}] ({i}/{num_steps}), Average loss: {np.mean(losses):.4f}, Accuracy: {100. * correct / total:.4f}",
+                end="",
+            )
+        
+        print(
+            f"\rEpoch: [{epoch}/{self.epochs}] ({i}/{num_steps}), Average loss: {np.mean(losses):.4f}, Accuracy: {100. * correct / total:.4f}",
+        )
+        
 
         accuracy = 100. * correct / total
-        return np.mean(losses), accuracy
+        return {"loss": np.mean(losses), "accuracy": accuracy}
     
-    def validate_classifier(self):
+    def validate_classifier(self, split="val"):
+        if split == "val":
+            loader = self.val_loader
+        elif split == "test":
+            loader = self.test_loader
+        else:
+            raise ValueError("Invalid split")
         self.classifier.eval()
         losses = []
         correct = 0
         total = 0
-
-        with torch.no_grad():
-            for batch in self.val_dataset:
-                target = batch['label'].float().to(self.device)
+        all_preds = []
+        all_targets = []
+        n_steps = len(loader)
+       
+        for i, batch in enumerate(loader):
+            with torch.no_grad():
+                target = batch["label"].float().to(self.device)
+                
                 output = self.classifier(batch).squeeze()
                 loss = self.classification_criterion(output, target)
                 losses.append(loss.item())
                 predicted = (output > 0.5).float()
                 correct += (predicted == target).sum().item()
                 total += target.size(0)
-                
+                all_preds.extend(predicted.cpu().numpy())
+                all_targets.extend(target.cpu().numpy())
+
+            print(
+                f"\rEvaluation on {split} : [{i + 1}/{n_steps}] loss: {np.mean(losses):.3f}, acc: {100. * correct / total:.3f}   ",
+                end="",
+            )
+        print(
+            f"\rEvaluation on {split} : [{i + 1}/{n_steps}] loss: {np.mean(losses):.3f}, acc: {100. * correct / total:.3f}   ",
+            end="",
+        )
         accuracy = 100. * correct / total
+        if split == "test":
+            f1 = f1_score(all_targets, all_preds)
+            print(f"F1 score: {f1}")
+            print(f"Accuracy: {accuracy}")
         return np.mean(losses), accuracy
         
                 
