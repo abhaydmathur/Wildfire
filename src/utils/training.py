@@ -515,13 +515,13 @@ class VAETrainer:
             self.optimizer, T_max=len(self.train_loader), eta_min=0, last_epoch=-1
         )
 
-        self.criterion = BetaVAELoss(beta=args.beta)
+        self.criterion = BetaVAELoss(beta=self.args.beta)
         
         # Classifier model
-        self.classifier = ClassifierFeatures(self.model, self.device, latent_dim=self.args.latent_dim).to(self.device)
+        self.classifier = ClassifierFeatures(self.model, self.device, input_dim=self.args.latent_dim).to(self.device)
         
         self.classification_optimizer = torch.optim.Adam(
-            self.classifier.parameters(), lr=self.args.learning_rate, weight_decay=self.args.weight_decay
+            self.classifier.parameters(), lr=self.args.learning_rate_classifier, weight_decay=self.args.weight_decay
         )
         
         self.classification_criterion = torch.nn.BCELoss()
@@ -544,8 +544,13 @@ class VAETrainer:
         info = self.validate()
         log_info = {f"train/{k}": v for k, v in info.items()}
         self.save_to_log(self.args.log_dir, self.logger, log_info, 0)
-        
+    
     def train(self):
+        self.train_vae()
+        self.train_classifier()
+        self.validate_classifier()
+    
+    def train_vae(self):
         self.init_logs()
         print("Start VAE training for {} epochs.".format(self.epochs))
         losses = []
@@ -626,6 +631,31 @@ class VAETrainer:
         return {"loss": np.mean(losses)}
     
     def train_classifier(self,):
+        self.init_logs()
+        print("Start VAE Classifier training for {} epochs.".format(self.epochs_classifier))
+        losses = []
+        
+        for epoch in range(self.epochs_classifier):
+            info = self.train_classifier(epoch)
+            losses.append(info["loss"])
+            
+            log_info = {f"train_classfier/{k}": v for k, v in info.items()}
+            self.save_to_log(self.args.log_dir, self.logger, log_info, epoch + 1)
+            
+            if losses[-1] <= np.min(losses):
+                print("Saving best model at epoch {}".format(epoch))
+                
+                torch.save(
+                    self.model.state_dict(),
+                    os.path.join(
+                        self.model_save_path, "vae_classifier_model.pth"
+                    ),
+                )
+            if len(losses) - np.argmin(losses) > self.args.early_stopping_patience:
+                print(f"Early stopping after {epoch} epochs")
+                break
+    
+    def train_classifier_epoch(self,):
         self.classifier.train()
         correct = 0
         total = 0

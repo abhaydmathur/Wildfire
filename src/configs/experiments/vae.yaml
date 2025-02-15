@@ -1,0 +1,25 @@
+trial_name: "vae_trial"
+model_name: "vae"
+
+data_path: "/data/amathur-23/ROB313"
+
+learning_rate: 0.00001
+batch_size: 64
+epochs: 30
+learning_rate_classifier: 0.0001
+epochs_classifier: 20
+early_stopping_patience: 5
+early_stopping_threshold: 0.001 
+latent_dim: 256
+beta: 1
+
+log_dir: "./runs"
+model_save_path: "/data/iivanova-23/ROB313/models"
+
+gpu_id: 2
+seed: 42
+
+test_freq: 5
+pretrained: true
+weight_decay: 0.0001
+train_backbone: true 
