@@ -1,11 +1,12 @@
 import torch
 from torch.utils.data import DataLoader
 from utils.datasets import WildfireDataset
-from models import JustCoords, ResNetEncoder, ResNetBinaryClassifier
+from models import JustCoords, ResNetEncoder, ResNetBinaryClassifier, ConvVAE, ClassifierFeatures
 import numpy as np
 from tqdm import tqdm
 import os
 from sklearn.metrics import f1_score
+from torchvision import transforms
 
 from utils.logging_tb import Logger
 
@@ -14,6 +15,9 @@ import torch.nn.functional as F
 from torch.amp import GradScaler, autocast
 
 from utils.augmentations import ContrastiveTransformations
+
+from utils.losses import BetaVAELoss
+
 
 
 class Trainer:
@@ -455,3 +459,292 @@ class SimCLRTrainer:
         )
 
         return {"loss": np.mean(losses)}
+    
+class VAETrainer:
+    def __init__(self, args):
+        self.args = args
+        self.device = self.args.device
+        self.batch_size = self.args.batch_size
+        self.epochs = self.args.epochs
+        self.epochs_classifier = self.args.epochs_classifier
+        self.latent_dim = self.args.latent_dim
+        
+        self.transforms = transforms.Compose([
+            transforms.ToPILImage(),
+            transforms.Resize(256),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])            
+
+        self.train_dataset = WildfireDataset(
+            args.data_path, split="train", labeled=False, transforms=self.transforms
+        )
+        
+        self.train_dataset_labeled = WildfireDataset(
+            args.data_path, split="train", labeled=True, transforms=self.transforms)
+
+        self.val_dataset = WildfireDataset(args.data_path, split="val", transforms=self.transforms)
+
+        self.test_dataset = WildfireDataset(args.data_path, split="test", transforms=self.transforms)
+
+        print(f"Train dataset size: {len(self.train_dataset)}")
+        print(f"Train labeled dataset size: {len(self.train_dataset_labeled)}")
+        print(f"Val dataset size: {len(self.val_dataset)}")
+        print(f"Test dataset size: {len(self.test_dataset)}")
+
+        self.train_loader = DataLoader(
+            self.train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4
+        )
+        
+        self.train_loader_labeled = DataLoader(
+            self.train_dataset_labeled, batch_size=args.batch_size, shuffle=True, num_workers=4
+        )
+
+        self.val_loader = DataLoader(
+            self.val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4
+        )
+
+        self.test_loader = DataLoader(
+            self.test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4
+        )
+
+        # VAE model
+        self.model = ConvVAE(latent_dim=self.args.latent_dim).to(self.device)
+
+        self.optimizer = torch.optim.Adam(
+            self.model.parameters(), lr=self.args.learning_rate, weight_decay=self.args.weight_decay
+        )
+        
+        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            self.optimizer, T_max=len(self.train_loader), eta_min=0, last_epoch=-1
+        )
+
+        self.criterion = BetaVAELoss(beta=self.args.beta)
+        
+        # Classifier model
+        self.classifier = ClassifierFeatures(self.model, self.device, input_dim=self.args.latent_dim).to(self.device)
+        
+        self.classification_optimizer = torch.optim.Adam(
+            self.classifier.parameters(), lr=self.args.learning_rate_classifier, weight_decay=self.args.weight_decay
+        )
+        
+        self.classification_criterion = torch.nn.BCELoss()
+
+        self.log_dir = os.path.join(args.log_dir, self.args.trial_name)
+        os.makedirs(self.log_dir, exist_ok=True)
+        self.logger = Logger(self.log_dir)
+
+        self.model_save_path = os.path.join(args.model_save_path, self.args.trial_name)
+        os.makedirs(self.model_save_path, exist_ok=True)
+
+        self.best_model_path = None
+        self.latest_model_path = None
+        self.best_loss = np.inf
+        self.best_epoch = 0
+
+        self.training_history = {}
+        
+    def init_logs(self):
+        info = self.validate()
+        log_info = {f"train/{k}": v for k, v in info.items()}
+        self.save_to_log(self.args.log_dir, self.logger, log_info, 0)
+    
+    def train(self):
+        self.train_vae()
+        self.train_classifier()
+        self.validate_classifier()
+        self.validate_classifier(split="test")
+        
+    
+    def train_vae(self):
+        self.init_logs()
+        print("Start VAE training for {} epochs.".format(self.epochs))
+        losses = []
+        
+        for epoch in range(self.epochs):
+            info = self.train_epoch(epoch)
+            
+            
+            log_info = {f"train/{k}": v for k, v in info.items()}
+            self.save_to_log(self.args.log_dir, self.logger, log_info, epoch + 1)
+            
+            info = self.validate()
+            losses.append(info["loss"])
+            log_info = {f"val/{k}": v for k, v in info.items()}
+            self.save_to_log(self.args.log_dir, self.logger, log_info, epoch + 1)
+            
+            if losses[-1] <= np.min(losses):
+                print("Saving best model at epoch {}".format(epoch))
+                
+                torch.save(
+                    self.model.state_dict(),
+                    os.path.join(
+                        self.model_save_path, "vae_model.pth"
+                    ),
+                )
+            if len(losses) - np.argmin(losses) > self.args.early_stopping_patience:
+                print(f"Early stopping after {epoch} epochs")
+                break
+        
+    def train_epoch(self, epoch):
+        
+        losses = []
+        n_steps = len(self.train_loader)
+        for i, batch in enumerate(self.train_loader):
+            images = batch["image"].to(self.device)
+            self.optimizer.zero_grad()
+            recon_images, mu, logvar = self.model(images)
+            loss = self.criterion(images, recon_images, mu, logvar)
+            loss.backward()
+            self.optimizer.step()
+            losses.append(loss.item())
+
+            print(
+                f"\rEpoch: [{epoch}/{self.epochs}] ({i}/{n_steps}), Average loss: {np.mean(losses):.4f}, lr: {self.scheduler.get_last_lr()[0]:.4f}",
+                end="",
+            )
+
+        # warmup for the first 10 epochs
+        if epoch >= 5:
+            self.scheduler.step()
+
+        print(
+            f"\rEpoch: [{epoch}/{self.epochs}] ({i}/{n_steps}), Average loss: {np.mean(losses):.4f}, lr: {self.scheduler.get_last_lr()[0]:.4f}",
+        )
+
+        return {"loss": np.mean(losses)}
+
+    def save_to_log(self, logdir, logger, info, epoch, w_summary=False, model=None):
+        # save scalars
+        for tag, value in info.items():
+            logger.scalar_summary(tag, value, epoch)
+
+    def validate(self):
+        losses = []
+
+        num_steps = len(self.train_loader)
+        for i, batch in enumerate(self.train_loader):
+            images = batch["image"].to(self.device)
+            with torch.no_grad():
+                recon_images, mu, logvar = self.model(images)
+                loss = self.criterion(images, recon_images, mu, logvar)
+            losses.append(loss.item())
+
+            print(
+                f"\rEvaluation ({i}/{num_steps}), Average loss: {np.mean(losses):.4f}, lr: {self.scheduler.get_last_lr()[0]:.4f}",
+                end="",
+            )
+
+        print(
+            f"\rEvaluation ({i}/{num_steps}), Average loss: {np.mean(losses):.4f}, lr: {self.scheduler.get_last_lr()[0]:.4f}",
+        )
+
+        return {"loss": np.mean(losses)}
+    
+    def train_classifier(self):
+        print("Start VAE Classifier training for {} epochs.".format(self.epochs_classifier))
+        losses = []
+        
+        for epoch in range(self.epochs_classifier):
+            info = self.train_classifier_epoch(epoch)
+            losses.append(info["loss"])
+            
+            log_info = {f"train_classfier/{k}": v for k, v in info.items()}
+            self.save_to_log(self.args.log_dir, self.logger, log_info, epoch + 1)
+            
+            if losses[-1] <= np.min(losses):
+                print("Saving best model at epoch {}".format(epoch))
+                
+                torch.save(
+                    self.model.state_dict(),
+                    os.path.join(
+                        self.model_save_path, "vae_classifier_model.pth"
+                    ),
+                )
+            if len(losses) - np.argmin(losses) > self.args.early_stopping_patience:
+                print(f"Early stopping after {epoch} epochs")
+                break
+    
+    def train_classifier_epoch(self, epoch):
+        self.classifier.train()
+        correct = 0
+        total = 0
+        losses = []
+
+        num_steps = len(self.train_loader_labeled)
+        for i, batch in enumerate(self.train_loader_labeled):
+        
+            target = batch["label"].float().to(self.device) 
+
+            self.classification_optimizer.zero_grad()
+            
+                
+            output = self.classifier(batch).squeeze()  
+            loss = self.classification_criterion(output, target)
+            loss.backward()
+            self.classification_optimizer.step()
+
+            losses.append(loss.item())
+            predicted = (output > 0.5).float() 
+            correct += (predicted == target).sum().item()
+            total += target.size(0)
+            
+            print(
+                f"\rEpoch: [{epoch}/{self.epochs}] ({i}/{num_steps}), Average loss: {np.mean(losses):.4f}, Accuracy: {100. * correct / total:.4f}",
+                end="",
+            )
+        
+        print(
+            f"\rEpoch: [{epoch}/{self.epochs}] ({i}/{num_steps}), Average loss: {np.mean(losses):.4f}, Accuracy: {100. * correct / total:.4f}",
+        )
+        
+
+        accuracy = 100. * correct / total
+        return {"loss": np.mean(losses), "accuracy": accuracy}
+    
+    def validate_classifier(self, split="val"):
+        if split == "val":
+            loader = self.val_loader
+        elif split == "test":
+            loader = self.test_loader
+        else:
+            raise ValueError("Invalid split")
+        self.classifier.eval()
+        losses = []
+        correct = 0
+        total = 0
+        all_preds = []
+        all_targets = []
+        n_steps = len(loader)
+       
+        for i, batch in enumerate(loader):
+            with torch.no_grad():
+                target = batch["label"].float().to(self.device)
+                
+                output = self.classifier(batch).squeeze()
+                loss = self.classification_criterion(output, target)
+                losses.append(loss.item())
+                predicted = (output > 0.5).float()
+                correct += (predicted == target).sum().item()
+                total += target.size(0)
+                all_preds.extend(predicted.cpu().numpy())
+                all_targets.extend(target.cpu().numpy())
+
+            print(
+                f"\rEvaluation on {split} : [{i + 1}/{n_steps}] loss: {np.mean(losses):.3f}, acc: {100. * correct / total:.3f}   ",
+                end="",
+            )
+        print(
+            f"\rEvaluation on {split} : [{i + 1}/{n_steps}] loss: {np.mean(losses):.3f}, acc: {100. * correct / total:.3f}   ",
+            end="",
+        )
+        accuracy = 100. * correct / total
+        if split == "test":
+            f1 = f1_score(all_targets, all_preds)
+            print(f"F1 score: {f1}")
+            print(f"Accuracy: {accuracy}")
+        return np.mean(losses), accuracy
+        
+                
+        

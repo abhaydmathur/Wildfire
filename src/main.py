@@ -5,7 +5,7 @@ import torch
 import random
 import numpy as np
 
-from utils.training import Trainer, SimCLRTrainer
+from utils.training import Trainer, SimCLRTrainer, VAETrainer
 
 
 def get_args():
@@ -42,7 +42,14 @@ def main():
     seed_everything(args.seed)
     args.device = f"cuda:{args.gpu_id}" if torch.cuda.is_available() else "cpu"
 
-    trainer = Trainer(args) if args.model_name in ["just_coords", "resnet_classifier"] else SimCLRTrainer(args)
+    if args.model_name in ["just_coords", "resnet_classifier"]:
+        trainer = Trainer(args)
+    elif args.model_name == "sim_clr":
+        trainer = SimCLRTrainer(args)
+    elif args.model_name == "vae":
+        trainer = VAETrainer(args)
+    else:
+        raise ValueError(f"Unknown model name: {args.model_name}")
     trainer.train()
 
 
