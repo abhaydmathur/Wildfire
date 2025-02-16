@@ -14,6 +14,8 @@
 \usepackage{lipsum}
 \usepackage{graphicx}
 \usepackage{booktabs, multirow} 
+\usepackage{amsmath,amssymb}
+\DeclareMathOperator{\E}{\mathbb{E}}
 \graphicspath{{media/}}     % organize your images and other figures under media/ folder
 
 
@@ -88,6 +90,14 @@ related to annotation usage are rigorously upheld.
 
 \subsection{SimCLR}
 Just wanted to cite this paper~\cite{simclr}.
+
+\subsection{Variational Autoencoder (VAE) + Classifier}
+
+A Variational Autoencoder (VAE) was employed as a self-supervised learning approach to extract latent representations from the training dataset. The VAE comprises an encoder network, which maps input images to a latent space distribution, and a decoder network, which reconstructs the input from latent variables. The encoder network consists of a series of 4 convolutional layers followed by fully connected layers, while the decoder network mirrors the encoder architecture. The VAE was trained using the unlabeled training dataset. The training objective that we decided to use is Beta-VAE~\cite{beta-vae}. Beta-VAE is a modification of the original VAE that introduces a hyperparameter $\beta$ to the loss function. The $\beta$ parameter controls the trade-off between the reconstruction loss and the Kullback-Leibler divergence. The loss function for the Beta-VAE is given by:
+$$\mathcal{L}(\theta, \phi, x, z, \beta) = \E_{q_\phi(z|x)}[\log p_\theta(x|z)] - \beta D_{KL}(q_\phi(z|x)\| p(z))$$
+
+where $p(z|x)$ is the learned posterior, $p(z)$ is the prior distribution (assumed to be Gaussian), and $p(x|z$) represents the likelihood of reconstructing the input image from the latent space. Well chosen $\beta$ values can lead to disentangled representations in the latent space. The VAE was trained for 50 epochs using the Adam optimizer with a learning rate of 0.0001. The latent representations obtained from the VAE were then used to train a classifier. The classifier consists of a two fully connected layer with a ReLU activation fucntion and a Dropout layer in between. The classifier was trained using the labeled train dataset. The training objective was to minimize the binary cross-entropy loss between the predicted and true labels. The linear classifier was trained for 20 epochs using the Adam optimizer with a learning rate of 0.0001.
+
 
 \begin{table}[!htp]\centering
   \caption{Comparisons}\label{tab: }
