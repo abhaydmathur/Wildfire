@@ -92,26 +92,26 @@ class ConvVAE(nn.Module):
             nn.ReLU(),
             nn.Conv2d(64, 128, 4, stride=2, padding=1), # 56 -> 28
             nn.ReLU(),
-            nn.Conv2d(128, 256, 4, stride=2, padding=1),  # 28 -> 14
+            nn.Conv2d(128, 128, 4, stride=2, padding=1),  # 28 -> 14
             nn.ReLU(),
-            nn.Conv2d(256, 256, 4, stride=2, padding=1),  # 14 -> 7
-            nn.ReLU()
+            # nn.Conv2d(256, 256, 4, stride=2, padding=1),  # 14 -> 7
+            # nn.ReLU()
         )
         
-        self.encoder_output_dim = (256 * 7 * 7)
+        self.encoder_output_dim = (128 * 14 * 14)
         self.fc_mu = nn.Linear(self.encoder_output_dim, latent_dim)
         self.fc_var = nn.Linear(self.encoder_output_dim, latent_dim)
         
         # Decoder
         self.decoder_input = nn.Sequential(
-            nn.Linear(latent_dim, 256),
-            nn.Linear(256, self.encoder_output_dim)
+            nn.Linear(latent_dim, 128),
+            nn.Linear(128, self.encoder_output_dim)
         ) 
         
         self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(256, 256, 4, stride=2, padding=1),
-            nn.ReLU(),
-            nn.ConvTranspose2d(256, 128, 4, stride=2, padding=1),
+            # nn.ConvTranspose2d(256, 256, 4, stride=2, padding=1),
+            # nn.ReLU(),
+            nn.ConvTranspose2d(128, 128, 4, stride=2, padding=1),
             nn.ReLU(),
             nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1),
             nn.ReLU(),
@@ -136,7 +136,7 @@ class ConvVAE(nn.Module):
     
     def decode(self, z):
         x = self.decoder_input(z)
-        x = x.view(x.size(0), 256, 7, 7) 
+        x = x.view(x.size(0), 128, 14, 14) 
         x = self.decoder(x)
         return x
     
@@ -147,16 +147,16 @@ class ConvVAE(nn.Module):
         return z, mu, log_var
     
 class ClassifierFeatures(nn.Module):
-    def __init__(self, vae, device, input_dim=256, dropout=0.3):
+    def __init__(self, vae, device, input_dim=128, dropout=0.3):
         super(ClassifierFeatures, self).__init__()
         self.vae = vae.to(device)  
         self.vae.eval()  
         self.device = device
         self.fc = nn.Sequential(
-            nn.Linear(input_dim, 256),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(256, 128),
+            # nn.Linear(input_dim, 256),
+            # nn.ReLU(),
+            # nn.Dropout(dropout),
+            nn.Linear(input_dim, 64),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(128, 1),

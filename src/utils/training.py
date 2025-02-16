@@ -564,9 +564,14 @@ class VAETrainer:
         
         for epoch in range(self.epochs):
             info = self.train_epoch(epoch)
-            losses.append(info["loss"])
+            
             
             log_info = {f"train/{k}": v for k, v in info.items()}
+            self.save_to_log(self.args.log_dir, self.logger, log_info, epoch + 1)
+            
+            info = self.validate()
+            losses.append(info["loss"])
+            log_info = {f"val/{k}": v for k, v in info.items()}
             self.save_to_log(self.args.log_dir, self.logger, log_info, epoch + 1)
             
             if losses[-1] <= np.min(losses):
