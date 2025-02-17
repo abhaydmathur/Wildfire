@@ -18,6 +18,9 @@ from utils.augmentations import ContrastiveTransformations
 
 from utils.losses import BetaVAELoss
 
+from sklearn.cluster import KMeans, DBSCAN
+from sklearn.mixture import GaussianMixture
+
 
 
 class Trainer:
@@ -601,7 +604,7 @@ class VAETrainer:
             losses.append(loss.item())
 
             print(
-                f"\rEpoch: [{epoch}/{self.epochs}] ({i}/{n_steps}), Average loss: {np.mean(losses):.4f}, lr: {self.scheduler.get_last_lr()[0]:.4f}",
+                f"\rEpoch: [{epoch+1}/{self.epochs}] ({i}/{n_steps}), Average loss: {np.mean(losses):.4f}, lr: {self.scheduler.get_last_lr()[0]:.4f}",
                 end="",
             )
 
@@ -610,7 +613,7 @@ class VAETrainer:
             self.scheduler.step()
 
         print(
-            f"\rEpoch: [{epoch}/{self.epochs}] ({i}/{n_steps}), Average loss: {np.mean(losses):.4f}, lr: {self.scheduler.get_last_lr()[0]:.4f}",
+            f"\rEpoch: [{epoch+1}/{self.epochs}] ({i}/{n_steps}), Average loss: {np.mean(losses):.4f}, lr: {self.scheduler.get_last_lr()[0]:.4f}",
         )
 
         return {"loss": np.mean(losses)}
@@ -691,12 +694,12 @@ class VAETrainer:
             total += target.size(0)
             
             print(
-                f"\rEpoch: [{epoch}/{self.epochs}] ({i}/{num_steps}), Average loss: {np.mean(losses):.4f}, Accuracy: {100. * correct / total:.4f}",
+                f"\rEpoch: [{epoch+1}/{self.epochs_classifier}] ({i}/{num_steps}), Average loss: {np.mean(losses):.4f}, Accuracy: {100. * correct / total:.4f}",
                 end="",
             )
         
         print(
-            f"\rEpoch: [{epoch}/{self.epochs}] ({i}/{num_steps}), Average loss: {np.mean(losses):.4f}, Accuracy: {100. * correct / total:.4f}",
+            f"\rEpoch: [{epoch+1}/{self.epochs_classifier}] ({i}/{num_steps}), Average loss: {np.mean(losses):.4f}, Accuracy: {100. * correct / total:.4f}",
         )
         
 
@@ -745,6 +748,17 @@ class VAETrainer:
             print(f"F1 score: {f1}")
             print(f"Accuracy: {accuracy}")
         return np.mean(losses), accuracy
+    
+    def perform_clustering(self, features, method="kmeans", num_clusters=5):
+        if method == "kmeans":
+            clustering = KMeans(n_clusters=num_clusters, random_state=42).fit(features)
+        elif method == "gmm":
+            clustering = GaussianMixture(n_components=num_clusters, random_state=42).fit(features)
+        elif method == "dbscan":
+            clustering = DBSCAN(eps=0.5, min_samples=5).fit(features)
+        else:
+            raise ValueError("Unsupported clustering method")
+        return clustering.labels_
         
                 
         

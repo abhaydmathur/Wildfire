@@ -1,16 +1,16 @@
-trial_name: "vae_trial_128_32"
+trial_name: "vae_trial_256_32"
 model_name: "vae"
 
 data_path: "/data/amathur-23/ROB313"
 
 learning_rate: 0.0001
 batch_size: 32
-epochs: 50
-learning_rate_classifier: 0.001
-epochs_classifier: 20
+epochs: 100
+learning_rate_classifier: 0.0001
+epochs_classifier: 50
 early_stopping_patience: 5
 early_stopping_threshold: 0.001 
-latent_dim: 128
+latent_dim: 256
 beta: 1
 
 log_dir: "./runs"
