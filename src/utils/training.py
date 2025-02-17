@@ -526,7 +526,7 @@ class VAETrainer:
         self.criterion = BetaVAELoss(beta=self.args.beta)
         
         # Classifier model
-        self.classifier = ClassifierFeatures(self.model, self.device, input_dim=self.args.latent_dim).to(self.device)
+        self.classifier = ClassifierFeatures(self.model, input_dim=self.args.latent_dim, coords=True).to(self.device)
         
         self.classification_optimizer = torch.optim.Adam(
             self.classifier.parameters(), lr=self.args.learning_rate_classifier, weight_decay=self.args.weight_decay
@@ -561,6 +561,10 @@ class VAETrainer:
         
     
     def train_vae(self):
+        if self.args.pretrained_vae_path is not None:
+            self.model.load_state_dict(torch.load(self.args.pretrained_vae_path))
+            print("Loaded pretrained VAE model")
+            return
         self.init_logs()
         print("Start VAE training for {} epochs.".format(self.epochs))
         losses = []
@@ -679,11 +683,12 @@ class VAETrainer:
         for i, batch in enumerate(self.train_loader_labeled):
         
             target = batch["label"].float().to(self.device) 
-
+            image = batch["image"].to(self.device)
+            coords = batch["coords"].to(self.device)
+            
             self.classification_optimizer.zero_grad()
             
-                
-            output = self.classifier(batch).squeeze()  
+            output = self.classifier(image, coords).squeeze()  
             loss = self.classification_criterion(output, target)
             loss.backward()
             self.classification_optimizer.step()
@@ -724,8 +729,10 @@ class VAETrainer:
         for i, batch in enumerate(loader):
             with torch.no_grad():
                 target = batch["label"].float().to(self.device)
+                image = batch["image"].to(self.device) 
+                coords = batch["coords"].to(self.device)
                 
-                output = self.classifier(batch).squeeze()
+                output = self.classifier(image, coords).squeeze()
                 loss = self.classification_criterion(output, target)
                 losses.append(loss.item())
                 predicted = (output > 0.5).float()
@@ -760,5 +767,5 @@ class VAETrainer:
             raise ValueError("Unsupported clustering method")
         return clustering.labels_
         
-                
-        
+
+   

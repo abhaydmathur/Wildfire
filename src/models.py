@@ -147,11 +147,10 @@ class ConvVAE(nn.Module):
         return z, mu, log_var
     
 class ClassifierFeatures(nn.Module):
-    def __init__(self, vae, device, input_dim=256, dropout=0.1):
+    def __init__(self, vae, input_dim=256, dropout=0.1, coords=False):
         super(ClassifierFeatures, self).__init__()
-        self.vae = vae.to(device)  
-        self.vae.eval()  
-        self.device = device
+        self.vae = vae
+        input_dim = input_dim + 2 if coords else input_dim
         self.fc = nn.Sequential(
             nn.Linear(input_dim, 128),
             nn.ReLU(),
@@ -161,10 +160,22 @@ class ClassifierFeatures(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(64, 1),
             nn.Sigmoid()
-        ).to(device)  
+        )
 
-    def forward(self, x):
+    def forward(self, x, coords = None):
         with torch.no_grad():
-            x = x['image'].to(self.device)  
-            mu, _ = self.vae.encode(x)  
-        return self.fc(mu)
+            mu, logvar = self.vae.encode(x)
+            x = self.vae.reparameterize(mu, logvar)
+        if coords is not None:
+            x = torch.cat([x, coords], dim=1)
+        return self.fc(x)
+    
+    def train(self):
+        self.fc.train()
+        self.vae.eval()
+        
+    def eval(self):
+        self.fc.eval()
+        self.vae.eval()
+        
+    
