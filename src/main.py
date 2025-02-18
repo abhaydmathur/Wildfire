@@ -38,12 +38,33 @@ def main():
 
     print(f"Using config: {args}")
 
-    os.environ["HF_HOME"] = "/data/amathur-23/cache/"
+    os.environ["TORCH_HOME"] = "/data/amathur-23/ROB313"
     seed_everything(args.seed)
     args.device = f"cuda:{args.gpu_id}" if torch.cuda.is_available() else "cpu"
 
-    trainer = Trainer(args) if args.model_name in ["just_coords", "resnet_classifier"] else SimCLRTrainer(args)
-    trainer.train()
+    og_trial_name = args.trial_name
+
+    if type(args.backbones) == list:
+        for backbone in args.backbones:
+            args.backbone = backbone
+            args.trial_name = f"{og_trial_name}_{backbone}"
+
+            trainer = (
+                Trainer(args)
+                if args.model_name
+                in ["just_coords", "resnet_classifier", "classifier_with_pretrained"]
+                else SimCLRTrainer(args)
+            )
+            trainer.train()
+
+    else:
+        trainer = (
+            Trainer(args)
+            if args.model_name
+            in ["just_coords", "resnet_classifier", "classifier_with_pretrained"]
+            else SimCLRTrainer(args)
+        )
+        trainer.train()
 
 
 if __name__ == "__main__":

@@ -1,0 +1,27 @@
+trial_name: "classifier_w_pretrained_tune_enc_and_bb_trial"
+model_name: "classifier_with_pretrained"
+
+backbone: "resnet50"
+pretrained: True
+train_backbone: True
+encoder_path: "/data/amathur-23/ROB313/models/simclr_trial/simclr_model.pth"
+tune_encoder: true
+encoder_out_features: 128 
+classifier_hidden_layers: [512, 256]
+use_bn: false
+
+data_path: "/data/amathur-23/ROB313"
+
+learning_rate: 0.001
+batch_size: 32
+epochs: 20
+early_stopping_patience: 5
+early_stopping_threshold: 0.001 
+
+log_dir: "./runs"
+model_save_path: "/data/amathur-23/ROB313/models"
+
+gpu_id: 1
+seed: 42
+
+test_freq: 1

@@ -1,7 +1,12 @@
 import torch
 from torch.utils.data import DataLoader
 from utils.datasets import WildfireDataset
-from models import JustCoords, ResNetEncoder, ResNetBinaryClassifier
+from models import (
+    JustCoords,
+    ResNetEncoder,
+    ResNetBinaryClassifier,
+    BinaryClassifierWithPretrainedEncoder,
+)
 import numpy as np
 from tqdm import tqdm
 import os
@@ -50,6 +55,9 @@ class Trainer:
         self.model_save_path = args.model_save_path
         self.log_dir = args.log_dir
 
+        self.coords_based_models = ["just_coords"]
+        self.image_based_models = ["resnet_classifier", "classifier_with_pretrained"]
+
         if self.model_name == "resnet_classifier":
             self.model = ResNetBinaryClassifier(
                 backbone=args.backbone,
@@ -60,9 +68,24 @@ class Trainer:
         elif self.model_name == "just_coords":
             self.model = JustCoords().to(self.device)
 
+        elif self.model_name == "classifier_with_pretrained":
+            self.encoder = ResNetEncoder(
+                out_features=args.encoder_out_features,
+                backbone=args.backbone,
+                pretrained=args.pretrained,
+                train_backbone=args.train_backbone,
+                use_bn=args.use_bn,
+            )
+
+            self.encoder.load_state_dict(torch.load(args.encoder_path))
+            self.encoder = self.encoder.to(self.device)
+
+            self.model = BinaryClassifierWithPretrainedEncoder(
+                encoder=self.encoder, tune_encoder=args.tune_encoder
+            ).to(self.device)
+
         else:
             raise NotImplementedError("Model not implemented")
-        
 
         self.optimizer = torch.optim.Adam(
             self.model.parameters(), lr=args.learning_rate
@@ -110,10 +133,10 @@ class Trainer:
             coords = batch["coords"].to(self.device)
             labels = batch["label"].to(self.device)
 
-            if self.model_name == "resnet_classifier":
+            if self.model_name in self.image_based_models:
                 images = batch["image"].to(self.device)
                 inputs = images
-            elif self.model_name == "just_coords":
+            elif self.model_name in self.coords_based_models:
                 inputs = coords
             else:
                 raise NotImplementedError("Model not implemented")
@@ -163,10 +186,10 @@ class Trainer:
             coords = batch["coords"].to(self.device)
             labels = batch["label"].to(self.device)
 
-            if self.model_name == "resnet_classifier":
+            if self.model_name in self.image_based_models:
                 images = batch["image"].to(self.device)
                 inputs = images
-            elif self.model_name == "just_coords":
+            elif self.model_name in self.coords_based_models:
                 inputs = coords
             else:
                 raise NotImplementedError("Model not implemented")
@@ -307,7 +330,7 @@ class SimCLRTrainer:
         )
 
         self.model = ResNetEncoder(
-            out_features=128,
+            out_features=self.args.out_features,
             pretrained=self.args.pretrained,
             train_backbone=self.args.train_backbone,
         )
@@ -327,7 +350,9 @@ class SimCLRTrainer:
         os.makedirs(self.log_dir, exist_ok=True)
         self.logger = Logger(self.log_dir)
 
-        self.model_save_path = os.path.join(self.args.model_save_path, self.args.trial_name)
+        self.model_save_path =  os.path.join(
+            self.args.model_save_path, self.args.trial_name
+        )
         os.makedirs(self.model_save_path, exist_ok=True)
 
     def info_nce_loss(self, features):
@@ -377,14 +402,14 @@ class SimCLRTrainer:
         )
 
         return {"loss": np.mean(losses)}
-    
+
     def init_logs(self):
         info = self.validate()
         log_info = {f"train/{k}": v for k, v in info.items()}
         self.save_to_log(self.args.log_dir, self.logger, log_info, 0)
 
     def train(self):
-    
+
         self.init_logs()
         self.scaler = GradScaler()  # gradient scaling, useful when we use float16
 
@@ -400,12 +425,10 @@ class SimCLRTrainer:
 
             if losses[-1] <= np.min(losses):
                 print("Saving best model at epoch {}".format(epoch))
-                
+
                 torch.save(
                     self.model.state_dict(),
-                    os.path.join(
-                        self.model_save_path, "simclr_model.pth"
-                    ),
+                    os.path.join(self.model_save_path, "simclr_model.pth"),
                 )
 
             if len(losses) - np.argmin(losses) > self.args.early_stopping_patience:

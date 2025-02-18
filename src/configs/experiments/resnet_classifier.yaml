@@ -1,7 +1,11 @@
-trial_name: "resnet_classifier_trial"
+trial_name: "classifier_trial"
 model_name: "resnet_classifier"
 
-backbone: "resnet50"
+backbones: 
+    - "resnet34"
+    - "resnet101"
+    - "resnet50"
+    - "resnet18"
 pretrained: True
 train_backbone: False
 
@@ -16,7 +20,7 @@ early_stopping_threshold: 0.001
 log_dir: "./runs"
 model_save_path: "/data/amathur-23/ROB313/models"
 
-gpu_id: 1
+gpu_id: 2
 seed: 42
 
 test_freq: 5

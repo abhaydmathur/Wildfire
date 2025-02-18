@@ -1,0 +1,4 @@
+nohup: ignoring input
+Using config: Namespace(trial_name='simclr_trial', model_name='sim_clr', data_path='/data/amathur-23/ROB313', temperature=0.07, learning_rate=0.001, batch_size=16, epochs=30, early_stopping_patience=5, early_stopping_threshold=0.001, log_dir='./runs', model_save_path='/data/amathur-23/ROB313/models', gpu_id=0, seed=42, test_freq=5, pretrained=True, weight_decay=0.0001, train_backbone=True)
+Loading meta file: /data/amathur-23/ROB313/train_unlabeled.csv
+Using ResNet50 with 2048 FC input features
