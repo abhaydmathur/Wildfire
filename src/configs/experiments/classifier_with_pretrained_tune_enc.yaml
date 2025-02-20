@@ -1,14 +1,19 @@
-trial_name: "classifier_w_pretrained_tune_enc_and_bb_trial"
+trial_name: "classifier_w_pretrained_tune_enc_and_bb_trial_fin"
 model_name: "classifier_with_pretrained"
 
-backbone: "resnet50"
+backbones: 
+  - "resnet18"
+  - "resnet34"
+  - "resnet50"
+  - "resnet101"
+
 pretrained: True
 train_backbone: True
 encoder_path: "/data/amathur-23/ROB313/models/simclr_trial/simclr_model.pth"
 tune_encoder: true
 encoder_out_features: 128 
 classifier_hidden_layers: [512, 256]
-use_bn: false
+use_bn: true
 
 data_path: "/data/amathur-23/ROB313"
 

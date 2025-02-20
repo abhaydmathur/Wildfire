@@ -7,6 +7,15 @@ import numpy as np
 
 from utils.training import Trainer, SimCLRTrainer, VAETrainer
 
+TRAINER_MODELS = [
+    "just_coords",
+    "resnet_classifier",
+    "classifier_with_pretrained",
+    "coords_resnet_classifier",
+    "cnn_classifier",
+    "cnn_coords_classifier",
+]
+
 
 def get_args():
     parser = argparse.ArgumentParser("Train a model on Wildfire Dataset")
@@ -44,25 +53,31 @@ def main():
 
     og_trial_name = args.trial_name
 
+    og_encoder_path = args.encoder_path if hasattr(args, "encoder_path") else None
+
+    if not hasattr(args, "backbones"):
+        args.backbones = None
+
     if type(args.backbones) == list:
         for backbone in args.backbones:
             args.backbone = backbone
             args.trial_name = f"{og_trial_name}_{backbone}"
 
+            if og_encoder_path is not None:
+                args.encoder_path = og_encoder_path.replace(
+                    "simclr_trial", f"simclr_trial_{backbone}"
+                )        
+
             trainer = (
                 Trainer(args)
-                if args.model_name
-                in ["just_coords", "resnet_classifier", "classifier_with_pretrained"]
+                if args.model_name in TRAINER_MODELS
                 else SimCLRTrainer(args)
             )
             trainer.train()
 
     else:
         trainer = (
-            Trainer(args)
-            if args.model_name
-            in ["just_coords", "resnet_classifier", "classifier_with_pretrained"]
-            else SimCLRTrainer(args)
+            Trainer(args) if args.model_name in TRAINER_MODELS else SimCLRTrainer(args)
         )
         trainer.train()
 
