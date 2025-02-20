@@ -5,7 +5,7 @@ import torch
 import random
 import numpy as np
 
-from utils.training import Trainer, SimCLRTrainer
+from utils.training import Trainer, SimCLRTrainer, VAETrainer
 
 
 def get_args():

@@ -14,6 +14,8 @@
 \usepackage{lipsum}
 \usepackage{graphicx}
 \usepackage{booktabs, multirow} 
+\usepackage{amsmath,amssymb}
+\DeclareMathOperator{\E}{\mathbb{E}}
 \graphicspath{{media/}}     % organize your images and other figures under media/ folder
 
 
@@ -87,18 +89,105 @@ related to annotation usage are rigorously upheld.
 \subsection{Self-Supervision (Learning from Unlabeled Data)}
 
 \subsection{SimCLR}
+SimCLR (Simple Framework for Contrastive Learning of Visual Representations) is
+a self-supervised learning method that does not require any labels. It learns
+visual representations by maximizing the agreement between differently
+augmented views of the same data example.
+
+The training pipeline of SimCLR consists of the following steps:
+
+\subsubsection{Data Augmentation}
+Each input image is transformed into two different augmented views through a
+series of random augmentations such as cropping, resizing, flipping, color
+jittering, and Gaussian blurring. These augmentations are crucial as they
+create diverse views of the same image, which the model learns to recognize as
+similar.
+
+\subsubsection{Encoder Network}
+Both augmented views are passed through an encoder network (typically a ResNet)
+to obtain their respective feature representations. The encoder network is
+shared between the two views.
+
+\subsubsection{Projection Head}
+The feature representations are then passed through a small neural network
+called the projection head, which maps them to a latent space where the
+contrastive loss is applied. The projection head typically consists of a few
+fully connected layers.
+
+\subsubsection{Contrastive Loss}
+The core idea of SimCLR is to bring the representations of the two augmented
+views of the same image closer together in the latent space while pushing apart
+representations of different images. This is achieved using a contrastive loss
+function, specifically the normalized temperature-scaled cross-entropy loss
+(NT-Xent loss). The loss function is defined as:
+
+\begin{align}
+  \mathcal{L}_{i,j} & = -\log
+  \frac{\exp(\text{sim}(\mathbf{z}_i, \mathbf{z}_j) / \tau)}{\sum_{k=1}^{2N}
+  \mathbb{1}_{[k \neq i]} \exp(\text{sim}(\mathbf{z}_i, \mathbf{z}_k) / \tau)}
+\end{align}
+
+Where $\mathbf{z}_i$ and $\mathbf{z}_j$ are the latent representations of the
+two augmented views of the same image, $\text{sim}(\cdot, \cdot)$ denotes the
+cosine similarity, $\tau$ is a temperature parameter, and $N$ is the batch
+size.
+
+By training the model in this manner, SimCLR learns robust and generalizable
+visual representations that can be fine-tuned for downstream tasks such as
+classification, even with limited labeled data.
+
 Just wanted to cite this paper~\cite{simclr}.
 
+\subsection{Variational Autoencoder (VAE) + Classifier}
+
+A Variational Autoencoder (VAE) was employed as a self-supervised learning
+approach to extract latent representations from the training dataset. The VAE
+comprises an encoder network, which maps input images to a latent space
+distribution, and a decoder network, which reconstructs the input from latent
+variables. The encoder network consists of a series of 4 convolutional layers
+followed by fully connected layers, while the decoder network mirrors the
+encoder architecture. The VAE was trained using the unlabeled training dataset.
+The training objective that we decided to use is Beta-VAE~\cite{beta-vae}.
+Beta-VAE is a modification of the original VAE that introduces a hyperparameter
+$\beta$ to the loss function. The $\beta$ parameter controls the trade-off
+between the reconstruction loss and the Kullback-Leibler divergence. The loss
+function for the Beta-VAE is given by:
+
+\begin{align}
+  \mathcal{L}(\theta, \phi, x, z, \beta) & = \E_{q_\phi(z|x)}[\log p_\theta(x|z)] - \beta D_{KL}(q_\phi(z|x)\| p(z))
+\end{align}
+
+where $p(z|x)$ is the learned posterior, $p(z)$ is the prior distribution
+(assumed to be Gaussian), and $p(x|z$) represents the likelihood of
+reconstructing the input image from the latent space. Well chosen $\beta$
+values can lead to disentangled representations in the latent space. The VAE
+was trained for 50 epochs using the Adam optimizer with a learning rate of
+0.0001. The latent representations obtained from the VAE were then used to
+train a classifier. The classifier consists of a two fully connected layer with
+a ReLU activation fucntion and a Dropout layer in between. The classifier was
+trained using the labeled train dataset. The training objective was to minimize
+the binary cross-entropy loss between the predicted and true labels. The linear
+classifier was trained for 20 epochs using the Adam optimizer with a learning
+rate of 0.0001.
+
 \begin{table}[!htp]\centering
-  \caption{Comparisons}\label{tab: }
+  \caption{Results of different models with and without pre-training.}\label{tab:results}
   \scriptsize
-  \begin{tabular}{lrrrr}\toprule
-                                               & \textbf{Model}  & \textbf{Accuracy} & \textbf{F1 Score} \\\cmidrule{2-4}
-    \multirow{2}{*}{\textbf{No pre-training}}  & Coords Only     & 0.855             & 0.873             \\ %\cmidrule{2-4}
-                                               & ResNet50        & 0.985             & 0.986             \\\cmidrule{1-4}
-    \multirow{3}{*}{\textbf{Self-Supervision}} & SimCLR+ResNet50 & ---               & ---               \\ %\cmidrule{2-4}
-                                               & VAE             & ---               & ---               \\ %\cmidrule{2-4}
-                                               & Something Else  & ---               & ---               \\\midrule
+  \begin{tabular}{cllccc}\toprule
+    \textbf{Pre-Training}        & \textbf{Model}                      & \textbf{Backbone} & \textbf{\#params} & \textbf{Accuracy} & \textbf{F1 Score} \\\cmidrule{1-6}
+    ---                          & Coordinate Classifier               & ---               & ---               & 0.855             & 0.873             \\\cmidrule{1-6}
+    \multirow{4}{*}{---}         & \multirow{4}{*}{Feature Classifier} & ResNet18          & ---               & 0.983             & 0.984             \\
+                                 &                                     & ResNet34          & ---               & ---               & ---               \\
+                                 &                                     & ResNet50          & ---               & 0.985             & 0.986             \\
+                                 &                                     & ResNet101         & ---               & ---               & ---               \\\cmidrule{1-6}
+    \multirow{4}{*}{SimCLR}      & \multirow{4}{*}{Feature Classifier} & ResNet18          & ---               & ---               & ---               \\
+                                 &                                     & ResNet34          & ---               & ---               & ---               \\
+                                 &                                     & ResNet50          & ---               & 0.976             & 0.978             \\
+                                 &                                     & ResNet101         & ---               & ---               & ---               \\\cmidrule{1-6}
+    \multirow{4}{*}{$\beta$-VAE} & \multirow{4}{*}{Feature Classifier} & ResNet18          & ---               & ---               & ---               \\
+                                 &                                     & ResNet34          & ---               & ---               & ---               \\
+                                 &                                     & ResNet50          & ---               & ---               & ---               \\
+                                 &                                     & ResNet101         & ---               & ---               & ---               \\\midrule
     \bottomrule
   \end{tabular}
 \end{table}
