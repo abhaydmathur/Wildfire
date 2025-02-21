@@ -9,7 +9,7 @@ backbones:
 
 pretrained: True
 train_backbone: True
-encoder_path: "/data/amathur-23/ROB313/models/simclr_trial/simclr_model.pth"
+encoder_path: "/data/amathur-23/ROB313/models/simclr_trial_2/simclr_model.pth"
 tune_encoder: true
 encoder_out_features: 128 
 classifier_hidden_layers: [512, 256]
