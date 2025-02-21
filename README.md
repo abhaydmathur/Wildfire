@@ -1,36 +1,20 @@
 # Wildfire
 Course Project for CSC_5IA23_TA - Deep Learning Based Computer Vision
 
-## Problem Statement : Fire Detection
+Please refer to our [report](Report_IVANOVA_MATHUR.pdf) for details on implementations, experiments and results.
 
-This project focuses on fire detection using a provided dataset. The dataset contains three folders: a training set, a validation set, and a test set. However, there are specific constraints and guidelines to follow:
+## Quick Start
 
-### Dataset Access and Restrictions:
+Install dependencies : `$pip3 install -r requirements.txt`
 
-Please download the dataset from : https://www.kaggle.com/datasets/abdelghaniaaba/wildfire-prediction-dataset/code
-the dataset is composed of a training set, a validation set, and a test set.
-You are not allowed to access the label of the training set.
-Important: Any use of annotations from the training set will result in a zero grade.
+```bash
+python3 main.py [-h] [--config CONFIG] Train a model on Wildfire Dataset
 
-### Dataset Splitting:
+options:
+  -h, --help       show this help message and exit
+  --config CONFIG  Path to the config file
+```
 
-Split the original validation set into a new validation set and a new train set.
-You can use the original training set creatively, but without utilizing its labels.
+Configuration files can be found at [src/configs](src/configs).
 
-### Model Training:
-
-Train your deep neural network (DNN) using the newly defined training and validation sets.
-Feel free to use any methodology or additional resources to improve your model's performance, as long as you respect the annotation constraints.
-
-### Evaluation and Submission:
-
-a. Evaluate your model's performance on the new test set.
-b. Submit the following:
- 
-Code: Implemented in PyTorch.
-Pretrained Model: Include the trained weights.
-Report: A concise explanation of your approach, the methods used, and the reasoning behind your choices.
-
-## Ideas
-
-* **SimCLR?**
+Model weights and tensorboard logs can be found [here](https://drive.google.com/drive/folders/1pZr5ChXcgaOhYap-ZndseG_2MMviHvzp?usp=sharing). 

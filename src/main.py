@@ -65,7 +65,7 @@ def main():
 
             if og_encoder_path is not None:
                 args.encoder_path = og_encoder_path.replace(
-                    "simclr_trial", f"simclr_trial_{backbone}"
+                    "simclr_trial_2", f"simclr_trial_2_{backbone}"
                 )        
 
             trainer = (
