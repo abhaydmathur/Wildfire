@@ -174,11 +174,11 @@ size.
 
 \subsection{Variational Autoencoder (VAE) + Classifier}
 
-A Variational Autoencoder (VAE) was employed as a self-supervised learning
+A Variational Autoencoder (VAE) was used as a self-supervised learning
 approach to extract latent representations from the training dataset. The VAE
 comprises an encoder network, which maps input images to a latent space
 distribution, and a decoder network, which reconstructs the input from latent
-variables. The encoder network consists of a series of 4 convolutional layers
+variables. The encoder network consists of a series of convolutional layers
 followed by fully connected layers, while the decoder network mirrors the
 encoder architecture. The VAE was trained using the unlabeled training dataset.
 The training objective that we decided to use is Beta-VAE~\cite{beta-vae}.

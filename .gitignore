@@ -193,7 +193,8 @@ data/
 *.aux
 *.pdf 
 # build it yourself.
-
+*.aux
+*.pdf
 # 
 runs/
 src/runs/
