@@ -1,7 +1,17 @@
 import torch
 from torch.utils.data import DataLoader
 from utils.datasets import WildfireDataset
-from models import JustCoords, ResNetEncoder, ResNetBinaryClassifier, ConvVAE, ClassifierFeatures
+from models import (
+    JustCoords,
+    ResNetEncoder,
+    ResNetBinaryClassifier,
+    ResNetCoordsBinaryClassifier,
+    BinaryClassifierWithPretrainedEncoder,
+    ConvVAE,
+    ClassifierFeatures,
+    CNNBinaryClassifier,
+    CNNBinaryClassifierWithCoords,
+)
 import numpy as np
 from tqdm import tqdm
 import os
@@ -19,15 +29,30 @@ from utils.augmentations import ContrastiveTransformations
 from utils.losses import BetaVAELoss
 
 
-
 class Trainer:
     def __init__(self, args):
         self.args = args
         self.device = args.device
 
-        self.train_dataset = WildfireDataset(
-            args.data_path, split="train", labeled=True
-        )
+        if not hasattr(self.args, "use_pseudo_labels"):
+            self.args.use_pseudo_labels = False
+
+        
+        if not self.args.use_pseudo_labels:
+            self.train_dataset = WildfireDataset(
+                args.data_path, split="train", labeled=True
+            )
+        
+        else:
+            self.train_pseudo = WildfireDataset(
+                args.data_path, split="train", labeled=False, use_pseudo_labels=True
+            )
+            self.train_true = WildfireDataset(
+                args.data_path, split="train", labeled=True
+            )
+            self.train_dataset = torch.utils.data.ConcatDataset(
+                [self.train_pseudo, self.train_true]
+            )
 
         self.val_dataset = WildfireDataset(args.data_path, split="val")
 
@@ -54,6 +79,14 @@ class Trainer:
         self.model_save_path = args.model_save_path
         self.log_dir = args.log_dir
 
+        self.coords_based_models = ["just_coords"]
+        self.image_based_models = [
+            "resnet_classifier",
+            "classifier_with_pretrained",
+            "cnn_classifier",
+        ]
+        self.multi_modal_models = ["coords_resnet_classifier", "cnn_coords_classifier"]
+
         if self.model_name == "resnet_classifier":
             self.model = ResNetBinaryClassifier(
                 backbone=args.backbone,
@@ -64,15 +97,53 @@ class Trainer:
         elif self.model_name == "just_coords":
             self.model = JustCoords().to(self.device)
 
+        elif self.model_name == "classifier_with_pretrained":
+
+            print(f"Using pretrained encoder from {args.encoder_path}")
+            print(f"Encoder out features: {args.encoder_out_features}")
+            print(f"Backbone: {args.backbone}")
+            
+            self.encoder = ResNetEncoder(
+                out_features=args.encoder_out_features,
+                backbone=args.backbone,
+                pretrained=args.pretrained,
+                train_backbone=args.train_backbone,
+                use_bn=args.use_bn,
+            )
+
+            self.encoder.load_state_dict(torch.load(args.encoder_path))
+            self.encoder = self.encoder.to(self.device)
+
+            self.model = BinaryClassifierWithPretrainedEncoder(
+                encoder=self.encoder, tune_encoder=args.tune_encoder
+            ).to(self.device)
+
+        elif self.model_name == "coords_resnet_classifier":
+            self.model = ResNetCoordsBinaryClassifier(
+                backbone=args.backbone,
+                pretrained=args.pretrained,
+                train_backbone=args.train_backbone,
+                hidden_dims=args.hidden_dims,
+                dropout=args.dropout,
+            ).to(self.device)
+
+        elif self.model_name == "cnn_classifier":
+            self.model = CNNBinaryClassifier().to(self.device)
+
+        elif self.model_name == "cnn_coords_classifier":
+            self.model = CNNBinaryClassifierWithCoords().to(self.device)
+
         else:
             raise NotImplementedError("Model not implemented")
-        
 
         self.optimizer = torch.optim.Adam(
             self.model.parameters(), lr=args.learning_rate
         )
 
         self.criterion = torch.nn.BCELoss()
+
+        self.model_save_path = os.path.join(args.model_save_path, args.trial_name)
+        os.makedirs(self.model_save_path, exist_ok=True)
 
         self.log_path = os.path.join(args.log_dir, self.args.trial_name)
         os.makedirs(self.log_path, exist_ok=True)
@@ -114,16 +185,23 @@ class Trainer:
             coords = batch["coords"].to(self.device)
             labels = batch["label"].to(self.device)
 
-            if self.model_name == "resnet_classifier":
+            if self.model_name in self.image_based_models:
                 images = batch["image"].to(self.device)
                 inputs = images
-            elif self.model_name == "just_coords":
+            elif self.model_name in self.coords_based_models:
                 inputs = coords
+            elif self.model_name in self.multi_modal_models:
+                images = batch["image"].to(self.device)
+                inputs = (images, coords)
+
             else:
                 raise NotImplementedError("Model not implemented")
 
             self.optimizer.zero_grad()
-            outputs = self.model(inputs).squeeze()
+            if self.model_name not in self.multi_modal_models:
+                outputs = self.model(inputs).squeeze()
+            else:
+                outputs = self.model(*inputs).squeeze()
             loss = self.criterion(outputs, labels)
             loss.backward()
             self.optimizer.step()
@@ -167,16 +245,22 @@ class Trainer:
             coords = batch["coords"].to(self.device)
             labels = batch["label"].to(self.device)
 
-            if self.model_name == "resnet_classifier":
+            if self.model_name in self.image_based_models:
                 images = batch["image"].to(self.device)
                 inputs = images
-            elif self.model_name == "just_coords":
+            elif self.model_name in self.coords_based_models:
                 inputs = coords
+            elif self.model_name in self.multi_modal_models:
+                images = batch["image"].to(self.device)
+                inputs = (images, coords)
             else:
                 raise NotImplementedError("Model not implemented")
 
             with torch.no_grad():
-                outputs = self.model(inputs).squeeze()
+                if self.model_name not in self.multi_modal_models:
+                    outputs = self.model(inputs).squeeze()
+                else:
+                    outputs = self.model(*inputs).squeeze()
                 loss = self.criterion(outputs, labels)
 
             losses.append(loss.item())
@@ -311,7 +395,8 @@ class SimCLRTrainer:
         )
 
         self.model = ResNetEncoder(
-            out_features=128,
+            backbone=self.args.backbone,
+            out_features=self.args.out_features,
             pretrained=self.args.pretrained,
             train_backbone=self.args.train_backbone,
         )
@@ -331,7 +416,9 @@ class SimCLRTrainer:
         os.makedirs(self.log_dir, exist_ok=True)
         self.logger = Logger(self.log_dir)
 
-        self.model_save_path = os.path.join(self.args.model_save_path, self.args.trial_name)
+        self.model_save_path = os.path.join(
+            self.args.model_save_path, self.args.trial_name
+        )
         os.makedirs(self.model_save_path, exist_ok=True)
 
     def info_nce_loss(self, features):
@@ -381,14 +468,14 @@ class SimCLRTrainer:
         )
 
         return {"loss": np.mean(losses)}
-    
+
     def init_logs(self):
         info = self.validate()
         log_info = {f"train/{k}": v for k, v in info.items()}
         self.save_to_log(self.args.log_dir, self.logger, log_info, 0)
 
     def train(self):
-    
+
         self.init_logs()
         self.scaler = GradScaler()  # gradient scaling, useful when we use float16
 
@@ -404,12 +491,10 @@ class SimCLRTrainer:
 
             if losses[-1] <= np.min(losses):
                 print("Saving best model at epoch {}".format(epoch))
-                
+
                 torch.save(
                     self.model.state_dict(),
-                    os.path.join(
-                        self.model_save_path, "simclr_model.pth"
-                    ),
+                    os.path.join(self.model_save_path, "simclr_model.pth"),
                 )
 
             if len(losses) - np.argmin(losses) > self.args.early_stopping_patience:
@@ -459,7 +544,8 @@ class SimCLRTrainer:
         )
 
         return {"loss": np.mean(losses)}
-    
+
+
 class VAETrainer:
     def __init__(self, args):
         self.args = args
@@ -468,25 +554,34 @@ class VAETrainer:
         self.epochs = self.args.epochs
         self.epochs_classifier = self.args.epochs_classifier
         self.latent_dim = self.args.latent_dim
-        
-        self.transforms = transforms.Compose([
-            transforms.ToPILImage(),
-            transforms.Resize(256),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ])            
+
+        self.transforms = transforms.Compose(
+            [
+                transforms.ToPILImage(),
+                transforms.Resize(256),
+                transforms.CenterCrop(224),
+                transforms.ToTensor(),
+                transforms.Normalize(
+                    mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
+                ),
+            ]
+        )
 
         self.train_dataset = WildfireDataset(
             args.data_path, split="train", labeled=False, transforms=self.transforms
         )
-        
+
         self.train_dataset_labeled = WildfireDataset(
-            args.data_path, split="train", labeled=True, transforms=self.transforms)
+            args.data_path, split="train", labeled=True, transforms=self.transforms
+        )
 
-        self.val_dataset = WildfireDataset(args.data_path, split="val", transforms=self.transforms)
+        self.val_dataset = WildfireDataset(
+            args.data_path, split="val", transforms=self.transforms
+        )
 
-        self.test_dataset = WildfireDataset(args.data_path, split="test", transforms=self.transforms)
+        self.test_dataset = WildfireDataset(
+            args.data_path, split="test", transforms=self.transforms
+        )
 
         print(f"Train dataset size: {len(self.train_dataset)}")
         print(f"Train labeled dataset size: {len(self.train_dataset_labeled)}")
@@ -496,9 +591,12 @@ class VAETrainer:
         self.train_loader = DataLoader(
             self.train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4
         )
-        
+
         self.train_loader_labeled = DataLoader(
-            self.train_dataset_labeled, batch_size=args.batch_size, shuffle=True, num_workers=4
+            self.train_dataset_labeled,
+            batch_size=args.batch_size,
+            shuffle=True,
+            num_workers=4,
         )
 
         self.val_loader = DataLoader(
@@ -513,22 +611,28 @@ class VAETrainer:
         self.model = ConvVAE(latent_dim=self.args.latent_dim).to(self.device)
 
         self.optimizer = torch.optim.Adam(
-            self.model.parameters(), lr=self.args.learning_rate, weight_decay=self.args.weight_decay
+            self.model.parameters(),
+            lr=self.args.learning_rate,
+            weight_decay=self.args.weight_decay,
         )
-        
+
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             self.optimizer, T_max=len(self.train_loader), eta_min=0, last_epoch=-1
         )
 
         self.criterion = BetaVAELoss(beta=self.args.beta)
-        
+
         # Classifier model
-        self.classifier = ClassifierFeatures(self.model, self.device, input_dim=self.args.latent_dim).to(self.device)
-        
+        self.classifier = ClassifierFeatures(
+            self.model, self.device, input_dim=self.args.latent_dim
+        ).to(self.device)
+
         self.classification_optimizer = torch.optim.Adam(
-            self.classifier.parameters(), lr=self.args.learning_rate_classifier, weight_decay=self.args.weight_decay
+            self.classifier.parameters(),
+            lr=self.args.learning_rate_classifier,
+            weight_decay=self.args.weight_decay,
         )
-        
+
         self.classification_criterion = torch.nn.BCELoss()
 
         self.log_dir = os.path.join(args.log_dir, self.args.trial_name)
@@ -544,51 +648,47 @@ class VAETrainer:
         self.best_epoch = 0
 
         self.training_history = {}
-        
+
     def init_logs(self):
         info = self.validate()
         log_info = {f"train/{k}": v for k, v in info.items()}
         self.save_to_log(self.args.log_dir, self.logger, log_info, 0)
-    
+
     def train(self):
         self.train_vae()
         self.train_classifier()
         self.validate_classifier()
         self.validate_classifier(split="test")
-        
-    
+
     def train_vae(self):
         self.init_logs()
         print("Start VAE training for {} epochs.".format(self.epochs))
         losses = []
-        
+
         for epoch in range(self.epochs):
             info = self.train_epoch(epoch)
-            
-            
+
             log_info = {f"train/{k}": v for k, v in info.items()}
             self.save_to_log(self.args.log_dir, self.logger, log_info, epoch + 1)
-            
+
             info = self.validate()
             losses.append(info["loss"])
             log_info = {f"val/{k}": v for k, v in info.items()}
             self.save_to_log(self.args.log_dir, self.logger, log_info, epoch + 1)
-            
+
             if losses[-1] <= np.min(losses):
                 print("Saving best model at epoch {}".format(epoch))
-                
+
                 torch.save(
                     self.model.state_dict(),
-                    os.path.join(
-                        self.model_save_path, "vae_model.pth"
-                    ),
+                    os.path.join(self.model_save_path, "vae_model.pth"),
                 )
             if len(losses) - np.argmin(losses) > self.args.early_stopping_patience:
                 print(f"Early stopping after {epoch} epochs")
                 break
-        
+
     def train_epoch(self, epoch):
-        
+
         losses = []
         n_steps = len(self.train_loader)
         for i, batch in enumerate(self.train_loader):
@@ -641,31 +741,33 @@ class VAETrainer:
         )
 
         return {"loss": np.mean(losses)}
-    
+
     def train_classifier(self):
-        print("Start VAE Classifier training for {} epochs.".format(self.epochs_classifier))
+        print(
+            "Start VAE Classifier training for {} epochs.".format(
+                self.epochs_classifier
+            )
+        )
         losses = []
-        
+
         for epoch in range(self.epochs_classifier):
             info = self.train_classifier_epoch(epoch)
             losses.append(info["loss"])
-            
+
             log_info = {f"train_classfier/{k}": v for k, v in info.items()}
             self.save_to_log(self.args.log_dir, self.logger, log_info, epoch + 1)
-            
+
             if losses[-1] <= np.min(losses):
                 print("Saving best model at epoch {}".format(epoch))
-                
+
                 torch.save(
                     self.model.state_dict(),
-                    os.path.join(
-                        self.model_save_path, "vae_classifier_model.pth"
-                    ),
+                    os.path.join(self.model_save_path, "vae_classifier_model.pth"),
                 )
             if len(losses) - np.argmin(losses) > self.args.early_stopping_patience:
                 print(f"Early stopping after {epoch} epochs")
                 break
-    
+
     def train_classifier_epoch(self, epoch):
         self.classifier.train()
         correct = 0
@@ -674,35 +776,33 @@ class VAETrainer:
 
         num_steps = len(self.train_loader_labeled)
         for i, batch in enumerate(self.train_loader_labeled):
-        
-            target = batch["label"].float().to(self.device) 
+
+            target = batch["label"].float().to(self.device)
 
             self.classification_optimizer.zero_grad()
-            
-                
-            output = self.classifier(batch).squeeze()  
+
+            output = self.classifier(batch).squeeze()
             loss = self.classification_criterion(output, target)
             loss.backward()
             self.classification_optimizer.step()
 
             losses.append(loss.item())
-            predicted = (output > 0.5).float() 
+            predicted = (output > 0.5).float()
             correct += (predicted == target).sum().item()
             total += target.size(0)
-            
+
             print(
                 f"\rEpoch: [{epoch}/{self.epochs}] ({i}/{num_steps}), Average loss: {np.mean(losses):.4f}, Accuracy: {100. * correct / total:.4f}",
                 end="",
             )
-        
+
         print(
             f"\rEpoch: [{epoch}/{self.epochs}] ({i}/{num_steps}), Average loss: {np.mean(losses):.4f}, Accuracy: {100. * correct / total:.4f}",
         )
-        
 
-        accuracy = 100. * correct / total
+        accuracy = 100.0 * correct / total
         return {"loss": np.mean(losses), "accuracy": accuracy}
-    
+
     def validate_classifier(self, split="val"):
         if split == "val":
             loader = self.val_loader
@@ -717,11 +817,11 @@ class VAETrainer:
         all_preds = []
         all_targets = []
         n_steps = len(loader)
-       
+
         for i, batch in enumerate(loader):
             with torch.no_grad():
                 target = batch["label"].float().to(self.device)
-                
+
                 output = self.classifier(batch).squeeze()
                 loss = self.classification_criterion(output, target)
                 losses.append(loss.item())
@@ -739,12 +839,9 @@ class VAETrainer:
             f"\rEvaluation on {split} : [{i + 1}/{n_steps}] loss: {np.mean(losses):.3f}, acc: {100. * correct / total:.3f}   ",
             end="",
         )
-        accuracy = 100. * correct / total
+        accuracy = 100.0 * correct / total
         if split == "test":
             f1 = f1_score(all_targets, all_preds)
             print(f"F1 score: {f1}")
             print(f"Accuracy: {accuracy}")
         return np.mean(losses), accuracy
-        
-                
-        

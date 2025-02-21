@@ -7,6 +7,15 @@ import numpy as np
 
 from utils.training import Trainer, SimCLRTrainer, VAETrainer
 
+TRAINER_MODELS = [
+    "just_coords",
+    "resnet_classifier",
+    "classifier_with_pretrained",
+    "coords_resnet_classifier",
+    "cnn_classifier",
+    "cnn_coords_classifier",
+]
+
 
 def get_args():
     parser = argparse.ArgumentParser("Train a model on Wildfire Dataset")
@@ -38,19 +47,39 @@ def main():
 
     print(f"Using config: {args}")
 
-    os.environ["HF_HOME"] = "/data/amathur-23/cache/"
+    os.environ["TORCH_HOME"] = "/data/amathur-23/ROB313"
     seed_everything(args.seed)
     args.device = f"cuda:{args.gpu_id}" if torch.cuda.is_available() else "cpu"
 
-    if args.model_name in ["just_coords", "resnet_classifier"]:
-        trainer = Trainer(args)
-    elif args.model_name == "sim_clr":
-        trainer = SimCLRTrainer(args)
-    elif args.model_name == "vae":
-        trainer = VAETrainer(args)
+    og_trial_name = args.trial_name
+
+    og_encoder_path = args.encoder_path if hasattr(args, "encoder_path") else None
+
+    if not hasattr(args, "backbones"):
+        args.backbones = None
+
+    if type(args.backbones) == list:
+        for backbone in args.backbones:
+            args.backbone = backbone
+            args.trial_name = f"{og_trial_name}_{backbone}"
+
+            if og_encoder_path is not None:
+                args.encoder_path = og_encoder_path.replace(
+                    "simclr_trial", f"simclr_trial_{backbone}"
+                )        
+
+            trainer = (
+                Trainer(args)
+                if args.model_name in TRAINER_MODELS
+                else SimCLRTrainer(args)
+            )
+            trainer.train()
+
     else:
-        raise ValueError(f"Unknown model name: {args.model_name}")
-    trainer.train()
+        trainer = (
+            Trainer(args) if args.model_name in TRAINER_MODELS else SimCLRTrainer(args)
+        )
+        trainer.train()
 
 
 if __name__ == "__main__":

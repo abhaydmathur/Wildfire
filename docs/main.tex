@@ -20,12 +20,7 @@
 
 
 %% Title
-\title{We Didn't Start The Fire
-%%%% Cite as
-% %%%% Update your official citation here when published 
-% \thanks{\textit{\underline{Citation}}: 
-% \textbf{Authors. Title. Pages.... DOI:000000/11111.}} 
-}
+\title{We Didn't Start The Fire: Robust Wildfire Detection With Limited Labeled Data}
 
 \author{
   Ivanina Ivanova, Abhay Mathur \\
@@ -38,14 +33,10 @@
 \begin{document}
 \maketitle
 
-\begin{abstract}
-  \lipsum[1]
-\end{abstract}
+% \begin{abstract}
+% \end{abstract}
 
-% keywords can be removed
-\keywords{First keyword \and Second keyword \and More}
-
-\section{Introduction: Problem Statement}
+\section{Problem Statement}
 This project aims to develop a fire detection system using a designated
 dataset. The dataset consists of three subsets: a training set, a validation
 set, and a test set. Specific constraints and guidelines must be strictly
@@ -74,19 +65,27 @@ training and validation sets. Various methodologies and supplementary resources
 may be incorporated to enhance model performance, provided that all constraints
 related to annotation usage are rigorously upheld.
 
-\section{Method}\label{sec:method}
+\section{Dataset Analysis}
 
-\subsection{Dataset Analysis}
-\dots
+\begin{figure}
+  \centering
+  \includegraphics[width=0.8\textwidth]{figures/coord_label.png}
+  \caption{Spatial Distribution of the Dataset. All splits show a similar spread of zones where fires are detected.}
+  \label{fig:dataset_analysis}
+\end{figure}
 
-\subsection{Proposition 1: Using Available Labeled Data}
+\section{Baselines: Using Available Labeled Data}
+
 \subsubsection{Naive Coordinates Classifier}
 \dots
 
-\subsubsection{ResNet Classifier}
+\subsubsection{Image Classifiers}
 \dots
 
-\subsection{Self-Supervision (Learning from Unlabeled Data)}
+\subsubsection{Fused Classifiers}
+\dots
+
+\section{Self-Supervision (Learning from Unlabeled Data)}
 
 \subsection{SimCLR}
 SimCLR (Simple Framework for Contrastive Learning of Visual Representations) is
@@ -171,26 +170,38 @@ classifier was trained for 20 epochs using the Adam optimizer with a learning
 rate of 0.0001.
 
 \begin{table}[!htp]\centering
-  \caption{Results of different models with and without pre-training.}\label{tab:results}
+  \caption{Results of different models with and without pre-training.}\label{tab:global_results}
   \scriptsize
   \begin{tabular}{cllccc}\toprule
-    \textbf{Pre-Training}        & \textbf{Model}                      & \textbf{Backbone} & \textbf{\#params} & \textbf{Accuracy} & \textbf{F1 Score} \\\cmidrule{1-6}
-    ---                          & Coordinate Classifier               & ---               & ---               & 0.855             & 0.873             \\\cmidrule{1-6}
-    \multirow{4}{*}{---}         & \multirow{4}{*}{Feature Classifier} & ResNet18          & ---               & 0.983             & 0.984             \\
-                                 &                                     & ResNet34          & ---               & ---               & ---               \\
-                                 &                                     & ResNet50          & ---               & 0.985             & 0.986             \\
-                                 &                                     & ResNet101         & ---               & ---               & ---               \\\cmidrule{1-6}
-    \multirow{4}{*}{SimCLR}      & \multirow{4}{*}{Feature Classifier} & ResNet18          & ---               & ---               & ---               \\
-                                 &                                     & ResNet34          & ---               & ---               & ---               \\
-                                 &                                     & ResNet50          & ---               & 0.976             & 0.978             \\
-                                 &                                     & ResNet101         & ---               & ---               & ---               \\\cmidrule{1-6}
-    \multirow{4}{*}{$\beta$-VAE} & \multirow{4}{*}{Feature Classifier} & ResNet18          & ---               & ---               & ---               \\
-                                 &                                     & ResNet34          & ---               & ---               & ---               \\
-                                 &                                     & ResNet50          & ---               & ---               & ---               \\
-                                 &                                     & ResNet101         & ---               & ---               & ---               \\\midrule
+    \textbf{Pre-Training}             & \textbf{Model}                                   & \textbf{Backbone}           & \textbf{\#params} & \textbf{Accuracy} & \textbf{F1 Score} \\ \cmidrule{1-6}
+    ---                               & Coordinate Classifier                            & ---                         & \textbf{4.417K}   & 0.855             & 0.873             \\ \cmidrule{1-6}
+    ---                               & CNN                                              & ---                         & 14.912M           & 0.9446            & 0.9491            \\ \cmidrule{1-6}
+    ---                               & CNN + Coordinate Classifier                      & ---                         & 14.913M           & 0.9832            & 0.9849            \\ \cmidrule{1-6}
+    \multirow{4}{*}{---}              & \multirow{4}{*}{Feature Classifier}              & ResNet18                    & 11.441M           & 0.983             & 0.984             \\
+                                      &                                                  & ResNet34                    & 21.549M           & 0.98              & 0.982             \\
+                                      &                                                  & ResNet50                    & 27.711M           & 0.985             & 0.986             \\
+                                      &                                                  & ResNet101                   & 46.703M           & 0.978             & 0.98              \\ \cmidrule{1-6}
+    \multirow{4}{*}{---}              & \multirow{4}{*}{Feature + Coordinate Classifier} & ResNet18                    & 11.442M           & 0.9916            & 0.9924            \\
+                                      &                                                  & ResNet34                    & 21.550M           & \textbf{0.9921}   & \textbf{0.9928}   \\
+                                      &                                                  & ResNet50                    & 24.560M           & 0.9906            & 0.9915            \\
+                                      &                                                  & ResNet101                   & 43.552M           & 0.99              & 0.991             \\ \cmidrule{1-6}
+    \multirow{4}{*}{SimCLR}           & \multirow{4}{*}{Feature Classifier}              & ResNet18                    & 11.523M           &                   &                   \\
+                                      &                                                  & ResNet34                    & 21.631M           &                   &                   \\
+                                      &                                                  & ResNet50                    & 27.988M           & 0.982             & 0.983             \\
+                                      &                                                  & ResNet101                   & 46.980M           &                   &                   \\ \cmidrule{1-6}
+    \multirow{2}{*}{Pseudo Labelling} & CNN                                              & ---                         & 14.912M           & 0.971             & 0.9737            \\
+                                      & CNN+Coordinate Classifier                        & ---                         & 14.913M           & 0.9867            & 0.9879            \\\cmidrule{1-6}
+    \multirow{4}{*}{$\beta$-VAE}      & \multirow{4}{*}{Feature Classifier}              & \#layers = 5                &                   & 0.887             & 0.9               \\
+                                      &                                                  & \& coords                   &                   & 0.936             & 0.943             \\
+                                      &                                                  & ResNet18          \& coords &                   & 0.934             & 0.942             \\
+                                      &                                                  & ResNet50          \& coords &                   & 0.915             & 0.926             \\ \cmidrule{1-6}
+    \multirow{2}{*}{VQ-VAE}           & \multirow{2}{*}{Feature Classifier}              & \& coords                   &                   & 0.931             & 0.936             \\
+                                      &                                                  & ResNet50          \& coords &                   & 0.959             & 0.968             \\ \midrule
     \bottomrule
   \end{tabular}
 \end{table}
+
+\section{Experiments and Results}
 
 \section{Conclusion}
 Your conclusion here
