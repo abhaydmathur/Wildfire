@@ -540,7 +540,8 @@ class VAETrainer:
             input_dim = 64 * 56 * 56
         elif self.model.__class__.__name__ == "VQVAE" and self.args.pretrained:
             input_dim = 64
-        self.classifier = ClassifierFeatures(self.model, input_dim=input_dim, coords=True).to(self.device)
+            
+        self.classifier = ClassifierFeatures(self.model, input_dim=input_dim, coords=self.args.coords).to(self.device)
         
         self.classification_optimizer = torch.optim.Adam(
             self.classifier.parameters(), lr=self.args.learning_rate_classifier, weight_decay=self.args.weight_decay
