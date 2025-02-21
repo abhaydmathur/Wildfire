@@ -191,10 +191,9 @@ data/
 *.snm
 *.nav
 *.aux
-*.pdf 
+docs/*.pdf 
 # build it yourself.
 *.aux
-*.pdf
 # 
 runs/
 src/runs/
