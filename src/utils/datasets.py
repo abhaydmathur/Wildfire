@@ -7,10 +7,19 @@ import torch
 import matplotlib.pyplot as plt
 
 
-def show_image(image):
-    plt.imshow(image.permute(1, 2, 0))
-    plt.axis("off")
-    plt.show()
+def show_image(image, ax=None, title=None):
+    if ax is not None:
+        ax.imshow(image.permute(1, 2, 0))
+        ax.axis("off")
+        if title:
+            ax.set_title(title)
+    else:
+        plt.imshow(image.permute(1, 2, 0))
+        plt.axis("off")
+        if title:
+            plt.title(title)
+        plt.show()
+
 
 def load_image(path):
     try:
