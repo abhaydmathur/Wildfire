@@ -12,6 +12,15 @@ def show_image(image):
     plt.axis("off")
     plt.show()
 
+def load_image(path):
+    try:
+        image = Image.open(path).convert("RGB")
+    except Exception as e:
+        print(f"Error loading image: {path}")
+        image = np.random.randint(0, 255, (350, 350, 3))
+    image = np.array(image, dtype=np.float32) / 255.0
+    return torch.tensor(image).permute(2, 0, 1)
+
 
 class WildfireDataset(Dataset):
     def __init__(
@@ -20,11 +29,15 @@ class WildfireDataset(Dataset):
         split="train",
         labeled=False,
         transforms=None,
+        use_pseudo_labels=False,
     ):
         self.root_dir = root_dir
         self.split = split
         if not labeled and split == "train":
-            self.split = self.split + "_unlabeled"
+            if not use_pseudo_labels:
+                self.split = self.split + "_unlabeled"
+            else:
+                self.split = self.split + "_pseudo_labeled"
 
         self.labeled = labeled
         if self.split != "train_unlabeled":
@@ -72,6 +85,7 @@ class WildfireDataset(Dataset):
             return {
                 "image": image,
                 "coords": coords,
+                "filename" : filename
             }
         else:
             label = float(1 if self.id_to_label[idx] == "wildfire" else 0)
@@ -79,4 +93,5 @@ class WildfireDataset(Dataset):
                 "image": image,
                 "label": torch.tensor(label, dtype=torch.float),
                 "coords": coords,
+                "filename" : filename
             }

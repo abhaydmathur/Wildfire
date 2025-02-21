@@ -1,0 +1,23 @@
+trial_name: "simple_classifier_pseudo_labels_trial"
+model_name: "cnn_classifier"
+
+use_pseudo_labels: True
+
+pretrained: True
+train_backbone: False
+
+data_path: "/data/amathur-23/ROB313"
+
+learning_rate: 0.001
+batch_size: 32
+epochs: 20
+early_stopping_patience: 5
+early_stopping_threshold: 0.001 
+
+log_dir: "./runs"
+model_save_path: "/data/amathur-23/ROB313/models"
+
+gpu_id: 2
+seed: 42
+
+test_freq: 1

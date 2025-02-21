@@ -34,9 +34,25 @@ class Trainer:
         self.args = args
         self.device = args.device
 
-        self.train_dataset = WildfireDataset(
-            args.data_path, split="train", labeled=True
-        )
+        if not hasattr(self.args, "use_pseudo_labels"):
+            self.args.use_pseudo_labels = False
+
+        
+        if not self.args.use_pseudo_labels:
+            self.train_dataset = WildfireDataset(
+                args.data_path, split="train", labeled=True
+            )
+        
+        else:
+            self.train_pseudo = WildfireDataset(
+                args.data_path, split="train", labeled=False, use_pseudo_labels=True
+            )
+            self.train_true = WildfireDataset(
+                args.data_path, split="train", labeled=True
+            )
+            self.train_dataset = torch.utils.data.ConcatDataset(
+                [self.train_pseudo, self.train_true]
+            )
 
         self.val_dataset = WildfireDataset(args.data_path, split="val")
 

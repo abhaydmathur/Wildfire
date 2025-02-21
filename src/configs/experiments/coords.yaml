@@ -1,7 +1,8 @@
-name: "coords_only_trial"
+trial_name: "coords_only__with_pseudo_trial"
 model_name: "just_coords"
 
 data_path: "/data/amathur-23/ROB313"
+use_pseudo_labels: true
 
 learning_rate: 0.001
 batch_size: 32

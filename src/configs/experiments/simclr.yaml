@@ -1,4 +1,4 @@
-trial_name: "simclr_trial"
+trial_name: "simclr_trial_2"
 model_name: "sim_clr"
 
 data_path: "/data/amathur-23/ROB313"
