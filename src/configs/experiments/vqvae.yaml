@@ -1,5 +1,5 @@
-trial_name: "vae"
-model_name: "vae"
+trial_name: "vqvae"
+model_name: "vqvae"
 
 data_path: "/data/amathur-23/ROB313"
 

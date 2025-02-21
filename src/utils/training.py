@@ -8,7 +8,7 @@ from models import (
     ResNetCoordsBinaryClassifier,
     BinaryClassifierWithPretrainedEncoder,
     ConvVAE,
-    ClassifierFeatures,
+    VQVAE, ClassifierFeatures,
     CNNBinaryClassifier,
     CNNBinaryClassifierWithCoords,
 )
@@ -27,6 +27,9 @@ from torch.amp import GradScaler, autocast
 from utils.augmentations import ContrastiveTransformations
 
 from utils.losses import BetaVAELoss
+
+from sklearn.cluster import KMeans, DBSCAN
+from sklearn.mixture import GaussianMixture
 
 
 class Trainer:
@@ -608,13 +611,21 @@ class VAETrainer:
         )
 
         # VAE model
-        self.model = ConvVAE(latent_dim=self.args.latent_dim).to(self.device)
+        if 'vae' == args.model_name:
+            self.model = ConvVAE(latent_dim=self.args.latent_dim, pretrained=self.args.pretrained, backbone=self.args.backbone).to(self.device)
+        elif 'vqvae' in args.model_name:
+            self.model = VQVAE(in_channels=3, embedding_dim=64, num_embeddings=512, hidden_dims=[128, 256], beta=0.25, pretrained=self.args.pretrained, backbone=self.args.backbone).to(self.device)
+        else:
+            raise ValueError("Unsupported model name")
+            
 
         self.optimizer = torch.optim.Adam(
             self.model.parameters(),
             lr=self.args.learning_rate,
             weight_decay=self.args.weight_decay,
         )
+        
+        self.scaler = GradScaler() 
 
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             self.optimizer, T_max=len(self.train_loader), eta_min=0, last_epoch=-1
@@ -623,10 +634,15 @@ class VAETrainer:
         self.criterion = BetaVAELoss(beta=self.args.beta)
 
         # Classifier model
-        self.classifier = ClassifierFeatures(
-            self.model, self.device, input_dim=self.args.latent_dim
-        ).to(self.device)
-
+        if self.model.__class__.__name__ == "ConvVAE":
+            input_dim = self.args.latent_dim
+        elif self.model.__class__.__name__ == "VQVAE" and not self.args.pretrained:
+            input_dim = 64 * 56 * 56
+        elif self.model.__class__.__name__ == "VQVAE" and self.args.pretrained:
+            input_dim = 64
+            
+        self.classifier = ClassifierFeatures(self.model, input_dim=input_dim, coords=self.args.coords).to(self.device)
+        
         self.classification_optimizer = torch.optim.Adam(
             self.classifier.parameters(),
             lr=self.args.learning_rate_classifier,
@@ -661,13 +677,17 @@ class VAETrainer:
         self.validate_classifier(split="test")
 
     def train_vae(self):
+        if self.args.pretrained_vae_path != "":
+            self.model.load_state_dict(torch.load(self.args.pretrained_vae_path))
+            print("Loaded pretrained VAE model")
+            return
         self.init_logs()
-        print("Start VAE training for {} epochs.".format(self.epochs))
+        print(f"Start {self.model.__class__.__name__} training for {self.epochs} epochs.")
         losses = []
 
         for epoch in range(self.epochs):
             info = self.train_epoch(epoch)
-
+            
             log_info = {f"train/{k}": v for k, v in info.items()}
             self.save_to_log(self.args.log_dir, self.logger, log_info, epoch + 1)
 
@@ -693,24 +713,28 @@ class VAETrainer:
         n_steps = len(self.train_loader)
         for i, batch in enumerate(self.train_loader):
             images = batch["image"].to(self.device)
+            
+            with autocast(
+                device_type= "cuda", dtype=torch.float16
+            ):
+                args = self.model(images)
+                loss = self.model.loss_function(*args)['loss']
             self.optimizer.zero_grad()
-            recon_images, mu, logvar = self.model(images)
-            loss = self.criterion(images, recon_images, mu, logvar)
-            loss.backward()
-            self.optimizer.step()
+            self.scaler.scale(loss).backward()
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
             losses.append(loss.item())
-
             print(
-                f"\rEpoch: [{epoch}/{self.epochs}] ({i}/{n_steps}), Average loss: {np.mean(losses):.4f}, lr: {self.scheduler.get_last_lr()[0]:.4f}",
+                f"\rEpoch: [{epoch+1}/{self.epochs}] ({i}/{n_steps}), Average loss: {np.mean(losses):.4f}, lr: {self.scheduler.get_last_lr()[0]:.4f}",
                 end="",
             )
 
-        # warmup for the first 10 epochs
+        # warmup for the first 5 epochs
         if epoch >= 5:
             self.scheduler.step()
 
         print(
-            f"\rEpoch: [{epoch}/{self.epochs}] ({i}/{n_steps}), Average loss: {np.mean(losses):.4f}, lr: {self.scheduler.get_last_lr()[0]:.4f}",
+            f"\rEpoch: [{epoch+1}/{self.epochs}] ({i}/{n_steps}), Average loss: {np.mean(losses):.4f}, lr: {self.scheduler.get_last_lr()[0]:.4f}",
         )
 
         return {"loss": np.mean(losses)}
@@ -727,8 +751,12 @@ class VAETrainer:
         for i, batch in enumerate(self.train_loader):
             images = batch["image"].to(self.device)
             with torch.no_grad():
-                recon_images, mu, logvar = self.model(images)
-                loss = self.criterion(images, recon_images, mu, logvar)
+                with autocast(
+                    device_type= "cuda", dtype=torch.float16
+                ):
+                    args = self.model(images)
+                    loss = self.model.loss_function(*args)['loss']
+                    
             losses.append(loss.item())
 
             print(
@@ -776,12 +804,14 @@ class VAETrainer:
 
         num_steps = len(self.train_loader_labeled)
         for i, batch in enumerate(self.train_loader_labeled):
-
-            target = batch["label"].float().to(self.device)
-
+        
+            target = batch["label"].float().to(self.device) 
+            image = batch["image"].to(self.device)
+            coords = batch["coords"].to(self.device)
+            
             self.classification_optimizer.zero_grad()
-
-            output = self.classifier(batch).squeeze()
+            
+            output = self.classifier(image, coords).squeeze()  
             loss = self.classification_criterion(output, target)
             loss.backward()
             self.classification_optimizer.step()
@@ -792,12 +822,12 @@ class VAETrainer:
             total += target.size(0)
 
             print(
-                f"\rEpoch: [{epoch}/{self.epochs}] ({i}/{num_steps}), Average loss: {np.mean(losses):.4f}, Accuracy: {100. * correct / total:.4f}",
+                f"\rEpoch: [{epoch+1}/{self.epochs_classifier}] ({i}/{num_steps}), Average loss: {np.mean(losses):.4f}, Accuracy: {100. * correct / total:.4f}",
                 end="",
             )
 
         print(
-            f"\rEpoch: [{epoch}/{self.epochs}] ({i}/{num_steps}), Average loss: {np.mean(losses):.4f}, Accuracy: {100. * correct / total:.4f}",
+            f"\rEpoch: [{epoch+1}/{self.epochs_classifier}] ({i}/{num_steps}), Average loss: {np.mean(losses):.4f}, Accuracy: {100. * correct / total:.4f}",
         )
 
         accuracy = 100.0 * correct / total
@@ -821,8 +851,10 @@ class VAETrainer:
         for i, batch in enumerate(loader):
             with torch.no_grad():
                 target = batch["label"].float().to(self.device)
-
-                output = self.classifier(batch).squeeze()
+                image = batch["image"].to(self.device) 
+                coords = batch["coords"].to(self.device)
+                
+                output = self.classifier(image, coords).squeeze()
                 loss = self.classification_criterion(output, target)
                 losses.append(loss.item())
                 predicted = (output > 0.5).float()
@@ -845,3 +877,17 @@ class VAETrainer:
             print(f"F1 score: {f1}")
             print(f"Accuracy: {accuracy}")
         return np.mean(losses), accuracy
+    
+    def perform_clustering(self, features, method="kmeans", num_clusters=5):
+        if method == "kmeans":
+            clustering = KMeans(n_clusters=num_clusters, random_state=42).fit(features)
+        elif method == "gmm":
+            clustering = GaussianMixture(n_components=num_clusters, random_state=42).fit(features)
+        elif method == "dbscan":
+            clustering = DBSCAN(eps=0.5, min_samples=5).fit(features)
+        else:
+            raise ValueError("Unsupported clustering method")
+        return clustering.labels_
+        
+
+   

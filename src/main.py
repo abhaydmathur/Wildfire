@@ -75,6 +75,8 @@ def main():
             )
             trainer.train()
 
+    elif "vae" in args.model_name:
+        trainer = VAETrainer(args)
     else:
         trainer = (
             Trainer(args) if args.model_name in TRAINER_MODELS else SimCLRTrainer(args)
