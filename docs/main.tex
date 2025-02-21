@@ -14,6 +14,8 @@
 \usepackage{lipsum}
 \usepackage{graphicx}
 \usepackage{booktabs, multirow} 
+\usepackage{caption}
+\usepackage{subcaption}
 \usepackage{tikz}
 \usepackage{pgfplots}
 \usepackage{amsmath,amssymb}
@@ -71,11 +73,40 @@ related to annotation usage are rigorously upheld.
 
 \section{Dataset Analysis}
 
+The dataset consists of satellite images of areas that previously experienced
+wildfires in Canada. According to the problem statement, we discard the labels
+of the training set and split the validation dataset into labeled training and
+validation sets in a 4:1 ratio. The resulting splits are as follows:
+
+\begin{itemize}
+  \item Train: 5040 images
+  \item Train unlabeled: 30249 images
+  \item Val: 1260 images
+  \item Test: 6299 images
+\end{itemize}
+
+We show some representative images from the dataset in
+Figure~\ref{fig:samples}. A visual inspection of the dataset showed that most
+wildfire images contain more vegetation, while non-wildfire images pertain to
+urban locations.
+
+\begin{figure}
+  \centering
+  \includegraphics[width=0.8\textwidth]{figures/samples2.png}
+  \caption{Some sample images from the dataset.}
+  \label{fig:samples}
+\end{figure}
+
+The coordinates of the location of the images can be extracted from the
+filename. We show the spread of images with respect to labels in
+Figure~\ref{fig:coordinate_analysis}. This shows that there are some clusters
+consistent across splits where wildfires can be expected.
+
 \begin{figure}
   \centering
   \includegraphics[width=0.8\textwidth]{figures/coord_label.png}
   \caption{Spatial Distribution of the Dataset. All splits show a similar spread of zones where fires are detected.}
-  \label{fig:dataset_analysis}
+  \label{fig:coordinate_analysis}
 \end{figure}
 
 \section{Baselines: Using Available Labeled Data}
@@ -88,11 +119,13 @@ for classification.
 \subsubsection{Image Classifiers}
 We train a series of image classifiers using Convolutional Neural Networks
 (CNNs) to classify images based on their visual content. We experiment with
-different CNN architectures, including ResNet18, ResNet34, ResNet50, and ResNet101.
+different CNN architectures, including ResNet18, ResNet34, ResNet50, and
+ResNet101.
 
 \subsubsection{Fused Classifiers}
 We combine the coordinate-based classifier with the image classifiers to create
-a fused model that leverages both spatial and visual features for classification. 
+a fused model that leverages both spatial and visual features for
+classification.
 
 \section{Learning from Unlabeled Data}
 
@@ -174,18 +207,18 @@ size.
 
 \subsection{Variational Autoencoder (VAE) + Classifier}
 
-A Variational Autoencoder (VAE) was used as a self-supervised learning
-approach to extract latent representations from the training dataset. The VAE
-comprises an encoder network, which maps input images to a latent space
-distribution, and a decoder network, which reconstructs the input from latent
-variables. The encoder network consists of a series of convolutional layers
-followed by fully connected layers, while the decoder network mirrors the
-encoder architecture. The VAE was trained using the unlabeled training dataset.
-The training objective that we decided to use is Beta-VAE~\cite{beta-vae}.
-Beta-VAE is a modification of the original VAE that introduces a hyperparameter
-$\beta$ to the loss function. The $\beta$ parameter controls the trade-off
-between the reconstruction loss and the Kullback-Leibler divergence. The loss
-function for the Beta-VAE is given by:
+A Variational Autoencoder (VAE) was used as a self-supervised learning approach
+to extract latent representations from the training dataset. The VAE comprises
+an encoder network, which maps input images to a latent space distribution, and
+a decoder network, which reconstructs the input from latent variables. The
+encoder network consists of a series of convolutional layers followed by fully
+connected layers, while the decoder network mirrors the encoder architecture.
+The VAE was trained using the unlabeled training dataset. The training
+objective that we decided to use is Beta-VAE~\cite{beta-vae}. Beta-VAE is a
+modification of the original VAE that introduces a hyperparameter $\beta$ to
+the loss function. The $\beta$ parameter controls the trade-off between the
+reconstruction loss and the Kullback-Leibler divergence. The loss function for
+the Beta-VAE is given by:
 
 \begin{align}
   \mathcal{L}(\theta, \phi, x, z, \beta) & = \E_{q_\phi(z|x)}[\log p_\theta(x|z)] - \beta D_{KL}(q_\phi(z|x)\| p(z))
@@ -298,10 +331,10 @@ with 40GB vRAM.
                                       &                                                  & ResNet34                    & 21.550M           & \textbf{0.9921}   & \textbf{0.9928}   \\
                                       &                                                  & ResNet50                    & 24.560M           & 0.9906            & 0.9915            \\
                                       &                                                  & ResNet101                   & 43.552M           & 0.99              & 0.991             \\ \cmidrule{1-6}
-    \multirow{4}{*}{SimCLR}           & \multirow{4}{*}{Feature Classifier}              & ResNet18                    & 11.523M           &                   &                   \\
-                                      &                                                  & ResNet34                    & 21.631M           &                   &                   \\
-                                      &                                                  & ResNet50                    & 27.988M           & 0.982             & 0.983             \\
-                                      &                                                  & ResNet101                   & 46.980M           &                   &                   \\ \cmidrule{1-6}
+    \multirow{4}{*}{SimCLR}           & \multirow{4}{*}{Feature Classifier}              & ResNet18                    & 11.523M           & 0.98              & 0.982             \\
+                                      &                                                  & ResNet34                    & 21.631M           & 0.976             & 0.978             \\
+                                      &                                                  & ResNet50                    & 27.988M           & 0.984             & 0.985             \\
+                                      &                                                  & ResNet101                   & 46.980M           & 0.984             & 0.985             \\ \cmidrule{1-6}
     \multirow{2}{*}{Pseudo Labelling} & CNN                                              & ---                         & 14.912M           & 0.971             & 0.9737            \\
                                       & CNN+Coordinate Classifier                        & ---                         & 14.913M           & 0.9867            & 0.9879            \\\cmidrule{1-6}
     \multirow{4}{*}{$\beta$-VAE}      & \multirow{4}{*}{Feature Classifier}              & \#layers = 5                &                   & 0.887             & 0.9               \\
@@ -364,6 +397,36 @@ to performance improvements, they do not surpass the best purely supervised
 models, suggesting that direct supervised learning remains the most effective
 strategy for this classification task.
 
+\subsection{Error Analysis}
+
+While our best model has an accuracy of more than 99\%, it is essential to
+understand the errors made by the model. We analyze the confusion matrix of the
+best model and visualise the samples that were misclassified in
+Figure~\ref{fig:error_analysis}.
+
+\begin{figure}[!t]
+  \centering
+  \begin{subfigure}{0.325\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{figures/confusion.png}
+    \caption{Confusion Matrix}
+  \end{subfigure}%
+  \hfill
+  \begin{subfigure}{0.65\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{figures/errors3.png}
+    \caption{Misclassified Samples. Top and bottom rows show false positives and false negatives respectively.}
+  \end{subfigure}
+  \caption{Error Analysis: (a) Confusion Matrix of the best model, (b) Misclassified samples.}
+  \label{fig:error_analysis}
+\end{figure}
+
+We observe that most false negatives occur when the image has occlusions, such
+as by clouds, or large patches of water or monochromatic fields. On the other
+hand, it is not entirely clear why the model misclassifies some of the false
+positives, but a visual inspection showed that these images contain a lot of
+vegetation and are visually similar to wildfire images.
+
 \section{Conclusion}
 
 In this study, we evaluated various classification models with and without
@@ -384,6 +447,10 @@ supervised learning.
 These results indicate that direct supervised learning with a well-structured
 feature extractor, complemented by coordinate information, remains the most
 effective approach for this classification task.
+
+Future work could explore de-biasing the model to reduce errors on occluded
+images and to decorrelate wildfires with vegetation and investigate additional
+pre-training strategies to further enhance classification performance.
 
 %Bibliography
 \bibliographystyle{unsrt}
