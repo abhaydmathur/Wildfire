@@ -207,8 +207,9 @@ two augmented views of the same image, $\text{sim}(\cdot, \cdot)$ denotes the
 cosine similarity, $\tau$ is a temperature parameter, and $N$ is the batch
 size.
 
-\subsection{Variational Autoencoder (VAE) + Classifier}
+\subsection{Variational Autoencoder (VAE)}
 
+\subsubsection{$\beta$-VAE}
 A Variational Autoencoder (VAE) was used as a self-supervised learning approach
 to extract latent representations from the training dataset. The VAE comprises
 an encoder network, which maps input images to a latent space distribution, and
@@ -231,15 +232,38 @@ where $p(z|x)$ is the learned posterior, $p(z)$ is the prior distribution
 reconstructing the input image from the latent space. Well chosen $\beta$
 values can lead to disentangled representations in the latent space. The VAE
 was trained for 50 epochs using the Adam optimizer with a learning rate of
-0.0001. The latent representations obtained from the VAE were then used to
+0.0001.
+\\\
+\\\
+\textbf{Latent Representation Classifier}
+The latent representations obtained from the VAE were then used to
 train a classifier. The classifier consists of a two fully connected layer with
-a ReLU activation fucntion and a Dropout layer in between. The classifier was
+a ReLU activation fucntion and a Dropout of 0.2 layer in between. The classifier was
 trained using the labeled train dataset. The training objective was to minimize
 the binary cross-entropy loss between the predicted and true labels. The linear
 classifier was trained for 20 epochs using the Adam optimizer with a learning
 rate of 0.0001.
 
-\todo[inline]{Maybe something on VQ-VAE~\cite{vq-vae}?}
+\subsubsection{ResNet-based Encoder}
+To further improve the quality of the learned latent representations, we experimented with a ResNet-based encoder. The idea is to replace the standard convolutional layers with a ResNet architecture, this modification will help in capturing richer hierarchical features and improved the overall reconstruction quality, leading to better downstream classification performance.
+
+\subsubsection{Vector Quantized Variational Autoencoder (VQ-VAE)}
+Additionally, we experimented with a Vector Quantized Variational Autoencoder (VQ-VAE)~\cite{vq-vae}. The difference between VQ-VAE and the standard VAE is that VQ-VAE is using a discrete latent space instead of a continuous one. Instead of learning a probabilistic distribution in the latent space, VQ-VAE learns a set of discrete latent embeddings. The encoding process involves mapping an input image to the closest embedding vector from a learned codebook, effectively quantizing the latent representations. The loss function for VQ-VAE consists of three terms:
+
+\begin{align}
+  \mathcal{L}(x, z) & = \log p(x|z_q(x)) + | sg[z_e(x)] - e |_2^2 + \beta | z_e(x) - sg[e]  |_2^2
+\end{align}
+
+
+
+where $z_e$ is the encoder output, $z_q$ is the nearest codebook entry, and $sg[\cdot]$ is the stop-gradient operator. The first term represents the reconstruction loss, the second term ensures the encoder output stays close to the codebook entries, and the third term encourages the codebook entries to move toward the encoder outputs. The advantage of VQ-VAE is that it prevents posterior collapse, a common issue in VAEs where the latent representations become overly dependent on the prior, leading to poor representation learning. By enforcing a discrete latent space, VQ-VAE learns more interpretable and structured representations, which significantly improved the downstream classification task.
+\\\
+\\\
+\textbf{ResNet VQ-VAE}
+Same as the VAE we implemented a ResNet-based encoder for the VQ-VAE (ResNet VQ-VAE). The combination of ResNet and VQ-VAE provided both robust feature extraction and structured latent representations, leading to improved performance in our classification task. We used the same classifier architecture as in the VAE experiments.
+
+Our results demonstrate that moving from a standard VAE to a ResNet-based encoder and finally to VQ-VAE with ResNet led to progressively better latent representations and improved classification performance.
+
 
 \subsection{Pseudo-Labeling}
 
@@ -321,30 +345,35 @@ with 40GB vRAM.
   \caption{Performance comparison of various models with and without pre-training.}\label{tab:global_results}
   \scriptsize
   \begin{tabular}{cllccc}\toprule
-    \textbf{Pre-Training}             & \textbf{Model}                                   & \textbf{Backbone}           & \textbf{\#params} & \textbf{Accuracy} & \textbf{F1 Score} \\ \cmidrule{1-6}
-    ---                               & Coordinate Classifier                            & ---                         & \textbf{4.417K}   & 0.855             & 0.873             \\ \cmidrule{1-6}
-    ---                               & CNN                                              & ---                         & 14.912M           & 0.9446            & 0.9491            \\ \cmidrule{1-6}
-    ---                               & CNN + Coordinate Classifier                      & ---                         & 14.913M           & 0.9832            & 0.9849            \\ \cmidrule{1-6}
-    \multirow{4}{*}{---}              & \multirow{4}{*}{Feature Classifier}              & ResNet18                    & 11.441M           & 0.983             & 0.984             \\
-                                      &                                                  & ResNet34                    & 21.549M           & 0.98              & 0.982             \\
-                                      &                                                  & ResNet50                    & 27.711M           & 0.985             & 0.986             \\
-                                      &                                                  & ResNet101                   & 46.703M           & 0.978             & 0.98              \\ \cmidrule{1-6}
-    \multirow{4}{*}{---}              & \multirow{4}{*}{Feature + Coordinate Classifier} & ResNet18                    & 11.442M           & 0.9916            & 0.9924            \\
-                                      &                                                  & ResNet34                    & 21.550M           & \textbf{0.9921}   & \textbf{0.9928}   \\
-                                      &                                                  & ResNet50                    & 24.560M           & 0.9906            & 0.9915            \\
-                                      &                                                  & ResNet101                   & 43.552M           & 0.99              & 0.991             \\ \cmidrule{1-6}
-    \multirow{4}{*}{SimCLR}           & \multirow{4}{*}{Feature Classifier}              & ResNet18                    & 11.523M           & 0.98              & 0.982             \\
-                                      &                                                  & ResNet34                    & 21.631M           & 0.976             & 0.978             \\
-                                      &                                                  & ResNet50                    & 27.988M           & 0.984             & 0.985             \\
-                                      &                                                  & ResNet101                   & 46.980M           & 0.984             & 0.985             \\ \cmidrule{1-6}
-    \multirow{2}{*}{Pseudo Labelling} & CNN                                              & ---                         & 14.912M           & 0.971             & 0.9737            \\
-                                      & CNN+Coordinate Classifier                        & ---                         & 14.913M           & 0.9867            & 0.9879            \\\cmidrule{1-6}
-    \multirow{4}{*}{$\beta$-VAE}      & \multirow{4}{*}{Feature Classifier}              & \#layers = 5                &                   & 0.887             & 0.9               \\
-                                      &                                                  & \& coords                   &                   & 0.936             & 0.943             \\
-                                      &                                                  & ResNet18          \& coords &                   & 0.934             & 0.942             \\
-                                      &                                                  & ResNet50          \& coords &                   & 0.915             & 0.926             \\ \cmidrule{1-6}
-    \multirow{2}{*}{VQ-VAE}           & \multirow{2}{*}{Feature Classifier}              & \& coords                   &                   & 0.931             & 0.936             \\
-                                      &                                                  & ResNet50          \& coords &                   & 0.959             & 0.968             \\ \midrule
+    \textbf{Pre-Training}             & \textbf{Model}                                   & \textbf{Backbone} & \textbf{\#params} & \textbf{Accuracy} & \textbf{F1 Score} \\ \cmidrule{1-6}
+    ---                               & Coordinate Classifier                            & ---               & \textbf{4.417K}   & 0.855             & 0.873             \\ \cmidrule{1-6}
+    ---                               & CNN                                              & ---               & 14.912M           & 0.9446            & 0.9491            \\ \cmidrule{1-6}
+    ---                               & CNN + Coordinate Classifier                      & ---               & 14.913M           & 0.9832            & 0.9849            \\ \cmidrule{1-6}
+    \multirow{4}{*}{---}              & \multirow{4}{*}{Feature Classifier}              & ResNet18          & 11.441M           & 0.983             & 0.984             \\
+                                      &                                                  & ResNet34          & 21.549M           & 0.98              & 0.982             \\
+                                      &                                                  & ResNet50          & 27.711M           & 0.985             & 0.986             \\
+                                      &                                                  & ResNet101         & 46.703M           & 0.978             & 0.98              \\ \cmidrule{1-6}
+    \multirow{4}{*}{---}              & \multirow{4}{*}{Feature + Coordinate Classifier} & ResNet18          & 11.442M           & 0.9916            & 0.9924            \\
+                                      &                                                  & ResNet34          & 21.550M           & \textbf{0.9921}   & \textbf{0.9928}   \\
+                                      &                                                  & ResNet50          & 24.560M           & 0.9906            & 0.9915            \\
+                                      &                                                  & ResNet101         & 43.552M           & 0.99              & 0.991             \\ \cmidrule{1-6}
+    \multirow{4}{*}{SimCLR}           & \multirow{4}{*}{Feature Classifier}              & ResNet18          & 11.523M           & 0.98              & 0.982             \\
+                                      &                                                  & ResNet34          & 21.631M           & 0.976             & 0.978             \\
+                                      &                                                  & ResNet50          & 27.988M           & 0.984             & 0.985             \\
+                                      &                                                  & ResNet101         & 46.980M           & 0.984             & 0.985             \\ \cmidrule{1-6}
+    \multirow{2}{*}{Pseudo Labelling} & CNN                                              & ---               & 14.912M           & 0.971             & 0.9737            \\
+                                      & CNN+Coordinate Classifier                        & ---               & 14.913M           & 0.9867            & 0.9879            \\\cmidrule{1-6}
+    \multirow{6}{*}{$\beta$-VAE}      & Feature Classifier                               & -                 & 72.21K            & 0.887             & 0.9               \\\cmidrule{2-6}
+                                      & \multirow{5}{*}{Feature + Coordinate Classifier} & -                 & 73.43K            & 0.936             & 0.943             \\
+                                      &                                                  & ResNet18          & 27.83K            & 0.934             & 0.942             \\
+                                      &                                                  & ResNet34          & 48.04K            & 0.926             & 0.935             \\
+                                      &                                                  & ResNet50          & 55.64K            & 0.915             & 0.926             \\
+                                      &                                                  & ResNet101         & 93.62K            & 0.944             & 0.950             \\\cmidrule{1-6}
+    \multirow{5}{*}{VQ-VAE}           & Feature Classifier                               & -                 & 96.64K            & 0.931             & 0.936             \\ \cmidrule{2-6}
+                                      & \multirow{4}{*}{Feature + Coordinate Classifier} & ResNet18          & 46.29K            & 0.906             & 0.920             \\
+                                      &                                                  & ResNet34          & 66.51K            & -                 & -                 \\
+                                      &                                                  & ResNet50          & 70.96K            & 0.959             & 0.968             \\
+                                      &                                                  & ResNet101         & 108.9K            & -                 & -                 \\\midrule
     \bottomrule
   \end{tabular}
 \end{table}
@@ -376,8 +405,7 @@ suggests that ResNet34 provides an optimal balance of depth and generalization
 in this setting.
 
 Pre-training strategies yield mixed results. SimCLR, a self-supervised
-contrastive learning approach, demonstrates potential benefits, but results are
-only available for ResNet50, which achieves an accuracy of 98.2\%. While
+contrastive learning approach, demonstrates potential benefits, but results for ResNet50,  achieves an accuracy of 98.2\%. While
 competitive, this performance does not surpass the best fully supervised
 models. Pseudo-labeling improves performance for CNN-based models, raising the
 accuracy of a standard CNN to 97.1\% and CNN + Coordinate Classifier to
@@ -386,7 +414,7 @@ but does not surpass the best fully supervised methods.
 
 Latent representation learning methods such as $\beta$-VAE and VQ-VAE show
 comparatively lower performance. The best-performing $\beta$-VAE model with
-ResNet50 and coordinate information achieves 91.5\% accuracy, while VQ-VAE with
+ResNet101 and coordinate information achieves 94.4\% accuracy, while VQ-VAE with
 ResNet50 and coordinate information attains 95.9\%. These results suggest that
 while variational autoencoders can learn meaningful representations, they do
 not outperform direct supervised learning approaches.
