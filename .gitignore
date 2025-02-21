@@ -190,7 +190,11 @@ data/
 *.fdb_latexmk
 *.snm
 *.nav
-
+*.aux
+*.pdf 
+# build it yourself.
+*.aux
+*.pdf
 # 
 runs/
 src/runs/
