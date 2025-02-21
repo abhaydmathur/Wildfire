@@ -199,3 +199,6 @@ data/
 runs/
 src/runs/
 src/std_out/
+
+# Jupyter Notebooks
+notebooks/
