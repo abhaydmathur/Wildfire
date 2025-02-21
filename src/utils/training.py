@@ -1,7 +1,7 @@
 import torch
 from torch.utils.data import DataLoader
 from utils.datasets import WildfireDataset
-from models import JustCoords, ResNetEncoder, ResNetBinaryClassifier, ConvVAE, ClassifierFeatures
+from models import JustCoords, ResNetEncoder, ResNetBinaryClassifier, ConvVAE, ResNet_VAE, VQVAE, ClassifierFeatures
 import numpy as np
 from tqdm import tqdm
 import os
@@ -513,7 +513,14 @@ class VAETrainer:
         )
 
         # VAE model
-        self.model = ConvVAE(latent_dim=self.args.latent_dim).to(self.device)
+        if 'vae' == args.model_name:
+            self.model = ConvVAE(latent_dim=self.args.latent_dim).to(self.device)
+        elif 'resnet_vae' == args.model_name:
+            self.model = ResNet_VAE(CNN_embed_dim=self.args.latent_dim, backbone=self.args.backbone).to(self.device)
+        elif 'vqvae' in args.model_name:
+            self.model = VQVAE(in_channels=3, embedding_dim=64, num_embeddings=512, hidden_dims=[128, 256], beta=0.25, pretrained=self.args.pretrained, backbone=self.args.backbone).to(self.device)
+        
+        
 
         self.optimizer = torch.optim.Adam(
             self.model.parameters(), lr=self.args.learning_rate, weight_decay=self.args.weight_decay
@@ -526,7 +533,13 @@ class VAETrainer:
         self.criterion = BetaVAELoss(beta=self.args.beta)
         
         # Classifier model
-        self.classifier = ClassifierFeatures(self.model, input_dim=self.args.latent_dim, coords=True).to(self.device)
+        if self.args.model_name == "resnet_vae" or self.args.model_name == "vae":
+            input_dim = self.args.latent_dim
+        elif self.args.model_name == "vqvae":
+            input_dim = 64 * 56 * 56
+        elif self.args.model_name == "vqvae_resnet":
+            input_dim = 64
+        self.classifier = ClassifierFeatures(self.model, input_dim=input_dim, coords=True).to(self.device)
         
         self.classification_optimizer = torch.optim.Adam(
             self.classifier.parameters(), lr=self.args.learning_rate_classifier, weight_decay=self.args.weight_decay
@@ -561,17 +574,16 @@ class VAETrainer:
         
     
     def train_vae(self):
-        if self.args.pretrained_vae_path is not None:
+        if self.args.pretrained_vae_path != "":
             self.model.load_state_dict(torch.load(self.args.pretrained_vae_path))
             print("Loaded pretrained VAE model")
             return
         self.init_logs()
-        print("Start VAE training for {} epochs.".format(self.epochs))
+        print(f"Start {self.model.__class__.__name__} training for {self.epochs} epochs.")
         losses = []
         
         for epoch in range(self.epochs):
             info = self.train_epoch(epoch)
-            
             
             log_info = {f"train/{k}": v for k, v in info.items()}
             self.save_to_log(self.args.log_dir, self.logger, log_info, epoch + 1)
@@ -601,8 +613,12 @@ class VAETrainer:
         for i, batch in enumerate(self.train_loader):
             images = batch["image"].to(self.device)
             self.optimizer.zero_grad()
-            recon_images, mu, logvar = self.model(images)
-            loss = self.criterion(images, recon_images, mu, logvar)
+            if 'vae' == self.args.model_name or 'resnet_vae' == self.args.model_name:
+                recon_images, mu, logvar = self.model(images)
+                loss = self.criterion(images, recon_images, mu, logvar)
+            elif 'vqvae' in self.args.model_name:
+                args = self.model(images)
+                loss = self.model.loss_function(*args)['loss']
             loss.backward()
             self.optimizer.step()
             losses.append(loss.item())
@@ -612,7 +628,7 @@ class VAETrainer:
                 end="",
             )
 
-        # warmup for the first 10 epochs
+        # warmup for the first 5 epochs
         if epoch >= 5:
             self.scheduler.step()
 
@@ -634,8 +650,13 @@ class VAETrainer:
         for i, batch in enumerate(self.train_loader):
             images = batch["image"].to(self.device)
             with torch.no_grad():
-                recon_images, mu, logvar = self.model(images)
-                loss = self.criterion(images, recon_images, mu, logvar)
+                if 'vae' == self.args.model_name or 'resnet_vae' == self.args.model_name:
+                    recon_images, mu, logvar = self.model(images)
+                    loss = self.criterion(images, recon_images, mu, logvar)
+                elif 'vqvae' in self.args.model_name:
+                    args = self.model(images)
+                    loss = self.model.loss_function(*args)['loss']
+                    
             losses.append(loss.item())
 
             print(

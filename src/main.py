@@ -46,7 +46,7 @@ def main():
         trainer = Trainer(args)
     elif args.model_name == "sim_clr":
         trainer = SimCLRTrainer(args)
-    elif args.model_name == "vae":
+    elif "vae" in args.model_name:
         trainer = VAETrainer(args)
     else:
         raise ValueError(f"Unknown model name: {args.model_name}")

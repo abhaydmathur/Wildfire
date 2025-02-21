@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
+from typing import List, Union
 
 BACKBONES = {
     "resnet50": models.resnet50,
@@ -79,9 +80,20 @@ class ResNetBinaryClassifier(nn.Module):
         return self.sigmoid(self.resnet(x))
     
 
+    
+
 class ConvVAE(nn.Module):
-    def __init__(self, latent_dim=256):
+    def __init__(self, 
+                 latent_dim=256,
+                 pretrained=True, 
+                 backbone="resnet50"):
         super(ConvVAE, self).__init__()
+        
+        self.pretrained = pretrained
+        if self.pretrained:
+            resnet = BACKBONES[backbone](weights="DEFAULT")
+            modules = list(resnet.children())[:-1]
+            self.resnet = nn.Sequential(*modules)
         
         # Encoder
         # 3x224x224
@@ -146,6 +158,9 @@ class ConvVAE(nn.Module):
         z = self.decode(z)
         return z, mu, log_var
     
+    def __repr__(self):
+        return "ConvVAE"
+    
 class ClassifierFeatures(nn.Module):
     def __init__(self, vae, input_dim=256, dropout=0.1, coords=False):
         super(ClassifierFeatures, self).__init__()
@@ -164,8 +179,13 @@ class ClassifierFeatures(nn.Module):
 
     def forward(self, x, coords = None):
         with torch.no_grad():
-            mu, logvar = self.vae.encode(x)
-            x = self.vae.reparameterize(mu, logvar)
+            if self.vae.__class__.__name__ == "VQVAE":
+                x = self.vae.encode(x)
+                x, _ = self.vae.vq_layer(x)
+                x = x.view(x.shape[0], -1) 
+            else:
+                mu, logvar = self.vae.encode(x)
+                x = self.vae.reparameterize(mu, logvar)
         if coords is not None:
             x = torch.cat([x, coords], dim=1)
         return self.fc(x)
@@ -177,5 +197,341 @@ class ClassifierFeatures(nn.Module):
     def eval(self):
         self.fc.eval()
         self.vae.eval()
+        
+    
+class ResNet_VAE(nn.Module):
+    def __init__(self, fc_hidden1=1024, fc_hidden2=768, drop_p=0.3, CNN_embed_dim=256, backbone="resnet50", pretrained=True):
+        super(ResNet_VAE, self).__init__()
+
+        self.fc_hidden1, self.fc_hidden2, self.CNN_embed_dim = fc_hidden1, fc_hidden2, CNN_embed_dim
+
+        # CNN architechtures
+        self.ch1, self.ch2, self.ch3, self.ch4 = 16, 32, 64, 128
+        self.k1, self.k2, self.k3, self.k4 = (5, 5), (3, 3), (3, 3), (3, 3)      # 2d kernal size
+        self.s1, self.s2, self.s3, self.s4 = (2, 2), (2, 2), (2, 2), (2, 2)      # 2d strides
+        self.pd1, self.pd2, self.pd3, self.pd4 = (0, 0), (0, 0), (0, 0), (0, 0)  # 2d padding
+
+        # encoding components
+        if pretrained:
+            resnet = BACKBONES[backbone](weights="DEFAULT")
+        in_features = resnet.fc.in_features
+        modules = list(resnet.children())[:-1]      # delete the last fc layer.
+        self.resnet = nn.Sequential(*modules)
+        self.fc1 = nn.Linear(in_features, self.fc_hidden1)
+        self.bn1 = nn.BatchNorm1d(self.fc_hidden1, momentum=0.01)
+        self.fc2 = nn.Linear(self.fc_hidden1, self.fc_hidden2)
+        self.bn2 = nn.BatchNorm1d(self.fc_hidden2, momentum=0.01)
+        # Latent vectors mu and sigma
+        self.fc3_mu = nn.Linear(self.fc_hidden2, self.CNN_embed_dim)      # output = CNN embedding latent variables
+        self.fc3_logvar = nn.Linear(self.fc_hidden2, self.CNN_embed_dim)  # output = CNN embedding latent variables
+
+        # Sampling vector
+        self.fc4 = nn.Linear(self.CNN_embed_dim, self.fc_hidden2)
+        self.fc_bn4 = nn.BatchNorm1d(self.fc_hidden2)
+        self.fc5 = nn.Linear(self.fc_hidden2, 64 * 4 * 4)
+        self.fc_bn5 = nn.BatchNorm1d(64 * 4 * 4)
+        self.relu = nn.ReLU(inplace=True)
+
+        # Decoder
+        self.convTrans6 = nn.Sequential(
+            nn.ConvTranspose2d(in_channels=64, out_channels=32, kernel_size=self.k4, stride=self.s4,
+                               padding=self.pd4),
+            nn.BatchNorm2d(32, momentum=0.01),
+            nn.ReLU(inplace=True),
+        )
+        self.convTrans7 = nn.Sequential(
+            nn.ConvTranspose2d(in_channels=32, out_channels=8, kernel_size=self.k3, stride=self.s3,
+                               padding=self.pd3),
+            nn.BatchNorm2d(8, momentum=0.01),
+            nn.ReLU(inplace=True),
+        )
+
+        self.convTrans8 = nn.Sequential(
+            nn.ConvTranspose2d(in_channels=8, out_channels=3, kernel_size=self.k2, stride=self.s2,
+                               padding=self.pd2),
+            nn.BatchNorm2d(3, momentum=0.01),
+            nn.Sigmoid()    # y = (y1, y2, y3) \in [0 ,1]^3
+        )
+
+
+    def encode(self, x):
+        x = self.resnet(x)  # ResNet
+        x = x.view(x.size(0), -1)  # flatten output of conv
+
+        # FC layers
+        x = self.bn1(self.fc1(x))
+        x = self.relu(x)
+        x = self.bn2(self.fc2(x))
+        x = self.relu(x)
+        # x = F.dropout(x, p=self.drop_p, training=self.training)
+        mu, logvar = self.fc3_mu(x), self.fc3_logvar(x)
+        return mu, logvar
+
+    def reparameterize(self, mu, log_var):
+        std = torch.exp(0.5 * log_var)
+        eps = torch.randn_like(std)
+        return mu + eps * std
+
+    def decode(self, z):
+        x = self.relu(self.fc_bn4(self.fc4(z)))
+        x = self.relu(self.fc_bn5(self.fc5(x))).view(-1, 64, 4, 4)
+        x = self.convTrans6(x)
+        x = self.convTrans7(x)
+        x = self.convTrans8(x)
+        x = F.interpolate(x, size=(224, 224), mode='bilinear')
+        return x
+
+    def forward(self, x):
+        mu, logvar = self.encode(x)
+        z = self.reparameterize(mu, logvar)
+        x_reconst = self.decode(z)
+
+        return x_reconst, mu, logvar
+    
+    def __repr__(self):
+        return "ResNet_VAE"
+    
+class VectorQuantizer(nn.Module):
+    """
+    Reference:
+    [1] https://github.com/deepmind/sonnet/blob/v2/sonnet/src/nets/vqvae.py
+    """
+    def __init__(self,
+                 num_embeddings: int,
+                 embedding_dim: int,
+                 beta: float = 0.25):
+        super(VectorQuantizer, self).__init__()
+        self.K = num_embeddings
+        self.D = embedding_dim
+        self.beta = beta
+
+        self.embedding = nn.Embedding(self.K, self.D)
+        self.embedding.weight.data.uniform_(-1 / self.K, 1 / self.K)
+
+    def forward(self, latents: torch.Tensor) -> torch.Tensor:
+        latents = latents.permute(0, 2, 3, 1).contiguous()  # [B x D x H x W] -> [B x H x W x D]
+        latents_shape = latents.shape
+        flat_latents = latents.view(-1, self.D)  # [BHW x D]
+
+        # Compute L2 distance between latents and embedding weights
+        dist = torch.sum(flat_latents ** 2, dim=1, keepdim=True) + \
+               torch.sum(self.embedding.weight ** 2, dim=1) - \
+               2 * torch.matmul(flat_latents, self.embedding.weight.t())  # [BHW x K]
+
+        # Get the encoding that has the min distance
+        encoding_inds = torch.argmin(dist, dim=1).unsqueeze(1)  # [BHW, 1]
+
+        # Convert to one-hot encodings
+        device = latents.device
+        encoding_one_hot = torch.zeros(encoding_inds.size(0), self.K, device=device)
+        encoding_one_hot.scatter_(1, encoding_inds, 1)  # [BHW x K]
+
+        # Quantize the latents
+        quantized_latents = torch.matmul(encoding_one_hot, self.embedding.weight)  # [BHW, D]
+        quantized_latents = quantized_latents.view(latents_shape)  # [B x H x W x D]
+
+        # Compute the VQ Losses
+        commitment_loss = F.mse_loss(quantized_latents.detach(), latents)
+        embedding_loss = F.mse_loss(quantized_latents, latents.detach())
+
+        vq_loss = commitment_loss * self.beta + embedding_loss
+
+        # Add the residue back to the latents
+        quantized_latents = latents + (quantized_latents - latents).detach()
+
+        return quantized_latents.permute(0, 3, 1, 2).contiguous(), vq_loss  # [B x D x H x W]
+
+class ResidualLayer(nn.Module):
+
+    def __init__(self,
+                 in_channels: int,
+                 out_channels: int):
+        super(ResidualLayer, self).__init__()
+        self.resblock = nn.Sequential(nn.Conv2d(in_channels, out_channels,
+                                                kernel_size=3, padding=1, bias=False),
+                                      nn.ReLU(True),
+                                      nn.Conv2d(out_channels, out_channels,
+                                                kernel_size=1, bias=False))
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        return input + self.resblock(input)
+
+class VQVAE(nn.Module):
+
+    def __init__(self,
+                 in_channels: int,
+                 embedding_dim: int,
+                 num_embeddings: int,
+                 hidden_dims: List = None,
+                 beta: float = 0.25,
+                 pretrained=True,
+                 backbone="resnet50",
+                 **kwargs) -> None:
+        super(VQVAE, self).__init__()
+
+        self.embedding_dim = embedding_dim
+        self.num_embeddings = num_embeddings
+        self.beta = beta
+        
+        self.pretrained = pretrained
+        # Resnet Encoder
+        if self.pretrained:
+            resnet = BACKBONES[backbone](weights="DEFAULT")
+            modules = list(resnet.children())[:-1]
+            self.resnet = nn.Sequential(*modules)
+            in_channels = 2048
+
+        modules = []
+        if hidden_dims is None:
+            hidden_dims = [128, 256]
+
+        # Build Encoder
+        kernel_size = 3 if self.pretrained else 4
+        stride = 1 if self.pretrained else 2
+        for h_dim in hidden_dims:
+            modules.append(
+                nn.Sequential(
+                    nn.Conv2d(in_channels, out_channels=h_dim,
+                              kernel_size=kernel_size, stride=stride, padding=1),
+                    nn.LeakyReLU())
+            )
+            in_channels = h_dim
+
+        modules.append(
+            nn.Sequential(
+                nn.Conv2d(in_channels, in_channels,
+                          kernel_size=3, stride=1, padding=1),
+                nn.LeakyReLU())
+        )
+
+        for _ in range(6):
+            modules.append(ResidualLayer(in_channels, in_channels))
+        modules.append(nn.LeakyReLU())
+
+        modules.append(
+            nn.Sequential(
+                nn.Conv2d(in_channels, embedding_dim,
+                          kernel_size=1, stride=1),
+                nn.LeakyReLU())
+        )
+
+        self.encoder = nn.Sequential(*modules)
+
+        self.vq_layer = VectorQuantizer(num_embeddings,
+                                        embedding_dim,
+                                        self.beta)
+
+        # Build Decoder
+        modules = []
+        modules.append(
+            nn.Sequential(
+                nn.Conv2d(embedding_dim,
+                          hidden_dims[-1],
+                          kernel_size=3,
+                          stride=1,
+                          padding=1),
+                nn.LeakyReLU())
+        )
+
+        for _ in range(6):
+            modules.append(ResidualLayer(hidden_dims[-1], hidden_dims[-1]))
+
+        modules.append(nn.LeakyReLU())
+
+        hidden_dims.reverse()
+
+        for i in range(len(hidden_dims) - 1):
+            modules.append(
+                nn.Sequential(
+                    nn.ConvTranspose2d(hidden_dims[i],
+                                       hidden_dims[i + 1],
+                                       kernel_size=4,
+                                       stride=2,
+                                       padding=1),
+                    nn.LeakyReLU())
+            )
+        if self. pretrained:
+            modules.append(
+            nn.Sequential( 
+                          nn.ConvTranspose2d(hidden_dims[-1], hidden_dims[-1] // 2, kernel_size=4, stride=2, padding=1),
+                          nn.LeakyReLU(),
+                          nn.ConvTranspose2d(hidden_dims[-1] // 2, out_channels=3, kernel_size=4, stride=2, padding=1),
+                          nn.Tanh()))
+            modules.append(nn.Upsample(size=(224, 224), mode='bilinear', align_corners=False))
+        else:
+            modules.append(
+                nn.Sequential(
+                    nn.ConvTranspose2d(hidden_dims[-1],
+                                       out_channels=3,
+                                       kernel_size=4,
+                                       stride=2, padding=1),
+                    nn.Tanh()))
+
+        self.decoder = nn.Sequential(*modules)
+
+    def encode(self, input: torch.Tensor) -> List[torch.Tensor]:
+        """
+        Encodes the input by passing through the encoder network
+        and returns the latent codes.
+        :param input: (Tensor) Input tensor to encoder [N x C x H x W]
+        :return: (Tensor) List of latent codes
+        """
+        if self.pretrained:
+            input = self.resnet(input)
+        result = self.encoder(input)
+        return result
+
+    def decode(self, z: torch.Tensor) -> torch.Tensor:
+        """
+        Maps the given latent codes
+        onto the image space.
+        :param z: (Tensor) [B x D x H x W]
+        :return: (Tensor) [B x C x H x W]
+        """
+
+        result = self.decoder(z)
+        return result
+
+    def forward(self, input: torch.Tensor, **kwargs) -> List[torch.Tensor]:
+        encoding = self.encode(input)
+        quantized_inputs, vq_loss = self.vq_layer(encoding)
+        z = self.decode(quantized_inputs)
+        return [z, input , vq_loss, quantized_inputs]
+
+    def loss_function(self,
+                      *args,
+                      **kwargs) -> dict:
+        """
+        :param args:
+        :param kwargs:
+        :return:
+        """
+        recons = args[0]
+        input = args[1]
+        vq_loss = args[2]
+
+        recons_loss = F.mse_loss(recons, input)
+
+        loss = recons_loss + vq_loss
+        return {'loss': loss,
+                'Reconstruction_Loss': recons_loss,
+                'VQ_Loss':vq_loss}
+
+    def sample(self,
+               num_samples: int,
+               current_device: Union[int, str], **kwargs) -> torch.Tensor:
+        raise Warning('VQVAE sampler is not implemented.')
+
+    def generate(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
+        """
+        Given an input image x, returns the reconstructed image
+        :param x: (Tensor) [B x C x H x W]
+        :return: (Tensor) [B x C x H x W]
+        """
+
+        return self.forward(x)[0]
+    
+    def __repr__(self):
+        return "VQVAE"
         
     
