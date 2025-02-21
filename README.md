@@ -1,6 +1,8 @@
 # Wildfire
 Course Project for CSC_5IA23_TA - Deep Learning Based Computer Vision
 
+Please refer to our [report](Report_IVANOVA_MATHUR.pdf) for details on implementations, experiments and results.
+
 ## Quick Start
 
 Install dependencies : `$pip3 install -r requirements.txt`
