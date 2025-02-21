@@ -1,7 +1,7 @@
 import torch
 from torch.utils.data import DataLoader
 from utils.datasets import WildfireDataset
-from models import JustCoords, ResNetEncoder, ResNetBinaryClassifier, ConvVAE, ResNet_VAE, VQVAE, ClassifierFeatures
+from models import JustCoords, ResNetEncoder, ResNetBinaryClassifier, ConvVAE, VQVAE, ClassifierFeatures
 import numpy as np
 from tqdm import tqdm
 import os
@@ -514,17 +514,18 @@ class VAETrainer:
 
         # VAE model
         if 'vae' == args.model_name:
-            self.model = ConvVAE(latent_dim=self.args.latent_dim).to(self.device)
-        elif 'resnet_vae' == args.model_name:
-            self.model = ResNet_VAE(CNN_embed_dim=self.args.latent_dim, backbone=self.args.backbone).to(self.device)
+            self.model = ConvVAE(latent_dim=self.args.latent_dim, pretrained=self.args.pretrained, backbone=self.args.backbone).to(self.device)
         elif 'vqvae' in args.model_name:
             self.model = VQVAE(in_channels=3, embedding_dim=64, num_embeddings=512, hidden_dims=[128, 256], beta=0.25, pretrained=self.args.pretrained, backbone=self.args.backbone).to(self.device)
-        
-        
+        else:
+            raise ValueError("Unsupported model name")
+            
 
         self.optimizer = torch.optim.Adam(
             self.model.parameters(), lr=self.args.learning_rate, weight_decay=self.args.weight_decay
         )
+        
+        self.scaler = GradScaler() 
         
         self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             self.optimizer, T_max=len(self.train_loader), eta_min=0, last_epoch=-1
@@ -533,11 +534,11 @@ class VAETrainer:
         self.criterion = BetaVAELoss(beta=self.args.beta)
         
         # Classifier model
-        if self.args.model_name == "resnet_vae" or self.args.model_name == "vae":
+        if self.model.__class__.__name__ == "ConvVAE":
             input_dim = self.args.latent_dim
-        elif self.args.model_name == "vqvae":
+        elif self.model.__class__.__name__ == "VQVAE" and not self.args.pretrained:
             input_dim = 64 * 56 * 56
-        elif self.args.model_name == "vqvae_resnet":
+        elif self.model.__class__.__name__ == "VQVAE" and self.args.pretrained:
             input_dim = 64
         self.classifier = ClassifierFeatures(self.model, input_dim=input_dim, coords=True).to(self.device)
         
@@ -612,17 +613,17 @@ class VAETrainer:
         n_steps = len(self.train_loader)
         for i, batch in enumerate(self.train_loader):
             images = batch["image"].to(self.device)
-            self.optimizer.zero_grad()
-            if 'vae' == self.args.model_name or 'resnet_vae' == self.args.model_name:
-                recon_images, mu, logvar = self.model(images)
-                loss = self.criterion(images, recon_images, mu, logvar)
-            elif 'vqvae' in self.args.model_name:
+            
+            with autocast(
+                device_type= "cuda", dtype=torch.float16
+            ):
                 args = self.model(images)
                 loss = self.model.loss_function(*args)['loss']
-            loss.backward()
-            self.optimizer.step()
+            self.optimizer.zero_grad()
+            self.scaler.scale(loss).backward()
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
             losses.append(loss.item())
-
             print(
                 f"\rEpoch: [{epoch+1}/{self.epochs}] ({i}/{n_steps}), Average loss: {np.mean(losses):.4f}, lr: {self.scheduler.get_last_lr()[0]:.4f}",
                 end="",
@@ -650,10 +651,9 @@ class VAETrainer:
         for i, batch in enumerate(self.train_loader):
             images = batch["image"].to(self.device)
             with torch.no_grad():
-                if 'vae' == self.args.model_name or 'resnet_vae' == self.args.model_name:
-                    recon_images, mu, logvar = self.model(images)
-                    loss = self.criterion(images, recon_images, mu, logvar)
-                elif 'vqvae' in self.args.model_name:
+                with autocast(
+                    device_type= "cuda", dtype=torch.float16
+                ):
                     args = self.model(images)
                     loss = self.model.loss_function(*args)['loss']
                     

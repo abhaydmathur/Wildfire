@@ -86,57 +86,66 @@ class ConvVAE(nn.Module):
     def __init__(self, 
                  latent_dim=256,
                  pretrained=True, 
-                 backbone="resnet50"):
+                 backbone="resnet50", 
+                 beta=1.0):
         super(ConvVAE, self).__init__()
         
         self.pretrained = pretrained
+        self.latent_dim = latent_dim
+        self.beta = beta # for KL divergence
+        
         if self.pretrained:
+            
             resnet = BACKBONES[backbone](weights="DEFAULT")
-            modules = list(resnet.children())[:-1]
+            modules = list(resnet.children())[:-1]  
             self.resnet = nn.Sequential(*modules)
+            self.encoder_output_dim = resnet.fc.in_features 
+            
+        else:
+            # Standard convolutional encoder
+            self.encoder = nn.Sequential(
+                nn.Conv2d(3, 32, 4, stride=2, padding=1),  # 224 -> 112
+                nn.ReLU(),
+                nn.Conv2d(32, 64, 4, stride=2, padding=1),  # 112 -> 56
+                nn.ReLU(),
+                nn.Conv2d(64, 128, 4, stride=2, padding=1),  # 56 -> 28
+                nn.ReLU(),
+                nn.Conv2d(128, 256, 4, stride=2, padding=1),  # 28 -> 14
+                nn.ReLU(),
+                nn.Conv2d(256, 256, 4, stride=2, padding=1),  # 14 -> 7
+                nn.ReLU()
+            )
+            self.encoder_output_dim = 256 * 7 * 7  
         
-        # Encoder
-        # 3x224x224
-        self.encoder = nn.Sequential(
-            nn.Conv2d(3, 32, 4, stride=2, padding=1), # 224 -> 112
-            nn.ReLU(),
-            nn.Conv2d(32, 64, 4, stride=2, padding=1), # 112 -> 56
-            nn.ReLU(),
-            nn.Conv2d(64, 128, 4, stride=2, padding=1), # 56 -> 28
-            nn.ReLU(),
-            nn.Conv2d(128, 256, 4, stride=2, padding=1),  # 28 -> 14
-            nn.ReLU(),
-            nn.Conv2d(256, 256, 4, stride=2, padding=1),  # 14 -> 7
-            nn.ReLU()
-        )
-        
-        self.encoder_output_dim = (256 * 7 * 7)
+        # Fully connected layers for mu and logvar
         self.fc_mu = nn.Linear(self.encoder_output_dim, latent_dim)
         self.fc_var = nn.Linear(self.encoder_output_dim, latent_dim)
         
-        # Decoder
-        self.decoder_input = nn.Sequential(
-            nn.Linear(latent_dim, 256),
-            nn.Linear(256, self.encoder_output_dim)
-        ) 
+        # Decoder input       
+        self.decoder_input = nn.Linear(latent_dim, 256 * 7 * 7)
         
+        # Decoder
         self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(256, 256, 4, stride=2, padding=1),
+            nn.ConvTranspose2d(256, 256, 4, stride=2, padding=1),  # 7 -> 14
             nn.ReLU(),
-            nn.ConvTranspose2d(256, 128, 4, stride=2, padding=1),
+            nn.ConvTranspose2d(256, 128, 4, stride=2, padding=1),  # 14 -> 28
             nn.ReLU(),
-            nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1),
+            nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1),  # 28 -> 56
             nn.ReLU(),
-            nn.ConvTranspose2d(64, 32, 4, stride=2, padding=1),
+            nn.ConvTranspose2d(64, 32, 4, stride=2, padding=1),  # 56 -> 112
             nn.ReLU(),
-            nn.ConvTranspose2d(32, 3, 4, stride=2, padding=1),
+            nn.ConvTranspose2d(32, 3, 4, stride=2, padding=1),  # 112 -> 224
             nn.Sigmoid()
         )
         
     def encode(self, x):
         batch_size = x.size(0)
-        x = self.encoder(x)
-        x = x.view(batch_size,-1)
+        if self.pretrained:
+            x = self.resnet(x) 
+            x = x.view(batch_size, -1)  
+        else:
+            x = self.encoder(x)  
+            x = x.view(batch_size, -1)  
         mu = self.fc_mu(x)
         log_var = self.fc_var(x)
         return mu, log_var
@@ -155,8 +164,20 @@ class ConvVAE(nn.Module):
     def forward(self, x):
         mu, log_var = self.encode(x)
         z = self.reparameterize(mu, log_var)
-        z = self.decode(z)
-        return z, mu, log_var
+        x_reconstructed = self.decode(z)
+        return [x, x_reconstructed, mu, log_var]
+    
+    def loss_function(self, *args):
+        x = args[0]
+        recon_x = args[1]
+        mu = args[2]
+        log_var = args[3]   
+        
+        recon_loss = F.mse_loss(recon_x, x, reduction='sum')
+        kl_loss = -0.5 * torch.sum(1 + log_var - mu.pow(2) - (log_var.exp() + 1e-8))
+        loss = recon_loss + self.beta * kl_loss        
+        return {'loss': loss}
+    
     
     def __repr__(self):
         return "ConvVAE"
@@ -197,99 +218,6 @@ class ClassifierFeatures(nn.Module):
     def eval(self):
         self.fc.eval()
         self.vae.eval()
-        
-    
-class ResNet_VAE(nn.Module):
-    def __init__(self, fc_hidden1=1024, fc_hidden2=768, drop_p=0.3, CNN_embed_dim=256, backbone="resnet50", pretrained=True):
-        super(ResNet_VAE, self).__init__()
-
-        self.fc_hidden1, self.fc_hidden2, self.CNN_embed_dim = fc_hidden1, fc_hidden2, CNN_embed_dim
-
-        # CNN architechtures
-        self.ch1, self.ch2, self.ch3, self.ch4 = 16, 32, 64, 128
-        self.k1, self.k2, self.k3, self.k4 = (5, 5), (3, 3), (3, 3), (3, 3)      # 2d kernal size
-        self.s1, self.s2, self.s3, self.s4 = (2, 2), (2, 2), (2, 2), (2, 2)      # 2d strides
-        self.pd1, self.pd2, self.pd3, self.pd4 = (0, 0), (0, 0), (0, 0), (0, 0)  # 2d padding
-
-        # encoding components
-        if pretrained:
-            resnet = BACKBONES[backbone](weights="DEFAULT")
-        in_features = resnet.fc.in_features
-        modules = list(resnet.children())[:-1]      # delete the last fc layer.
-        self.resnet = nn.Sequential(*modules)
-        self.fc1 = nn.Linear(in_features, self.fc_hidden1)
-        self.bn1 = nn.BatchNorm1d(self.fc_hidden1, momentum=0.01)
-        self.fc2 = nn.Linear(self.fc_hidden1, self.fc_hidden2)
-        self.bn2 = nn.BatchNorm1d(self.fc_hidden2, momentum=0.01)
-        # Latent vectors mu and sigma
-        self.fc3_mu = nn.Linear(self.fc_hidden2, self.CNN_embed_dim)      # output = CNN embedding latent variables
-        self.fc3_logvar = nn.Linear(self.fc_hidden2, self.CNN_embed_dim)  # output = CNN embedding latent variables
-
-        # Sampling vector
-        self.fc4 = nn.Linear(self.CNN_embed_dim, self.fc_hidden2)
-        self.fc_bn4 = nn.BatchNorm1d(self.fc_hidden2)
-        self.fc5 = nn.Linear(self.fc_hidden2, 64 * 4 * 4)
-        self.fc_bn5 = nn.BatchNorm1d(64 * 4 * 4)
-        self.relu = nn.ReLU(inplace=True)
-
-        # Decoder
-        self.convTrans6 = nn.Sequential(
-            nn.ConvTranspose2d(in_channels=64, out_channels=32, kernel_size=self.k4, stride=self.s4,
-                               padding=self.pd4),
-            nn.BatchNorm2d(32, momentum=0.01),
-            nn.ReLU(inplace=True),
-        )
-        self.convTrans7 = nn.Sequential(
-            nn.ConvTranspose2d(in_channels=32, out_channels=8, kernel_size=self.k3, stride=self.s3,
-                               padding=self.pd3),
-            nn.BatchNorm2d(8, momentum=0.01),
-            nn.ReLU(inplace=True),
-        )
-
-        self.convTrans8 = nn.Sequential(
-            nn.ConvTranspose2d(in_channels=8, out_channels=3, kernel_size=self.k2, stride=self.s2,
-                               padding=self.pd2),
-            nn.BatchNorm2d(3, momentum=0.01),
-            nn.Sigmoid()    # y = (y1, y2, y3) \in [0 ,1]^3
-        )
-
-
-    def encode(self, x):
-        x = self.resnet(x)  # ResNet
-        x = x.view(x.size(0), -1)  # flatten output of conv
-
-        # FC layers
-        x = self.bn1(self.fc1(x))
-        x = self.relu(x)
-        x = self.bn2(self.fc2(x))
-        x = self.relu(x)
-        # x = F.dropout(x, p=self.drop_p, training=self.training)
-        mu, logvar = self.fc3_mu(x), self.fc3_logvar(x)
-        return mu, logvar
-
-    def reparameterize(self, mu, log_var):
-        std = torch.exp(0.5 * log_var)
-        eps = torch.randn_like(std)
-        return mu + eps * std
-
-    def decode(self, z):
-        x = self.relu(self.fc_bn4(self.fc4(z)))
-        x = self.relu(self.fc_bn5(self.fc5(x))).view(-1, 64, 4, 4)
-        x = self.convTrans6(x)
-        x = self.convTrans7(x)
-        x = self.convTrans8(x)
-        x = F.interpolate(x, size=(224, 224), mode='bilinear')
-        return x
-
-    def forward(self, x):
-        mu, logvar = self.encode(x)
-        z = self.reparameterize(mu, logvar)
-        x_reconst = self.decode(z)
-
-        return x_reconst, mu, logvar
-    
-    def __repr__(self):
-        return "ResNet_VAE"
     
 class VectorQuantizer(nn.Module):
     """
@@ -357,11 +285,10 @@ class ResidualLayer(nn.Module):
         return input + self.resblock(input)
 
 class VQVAE(nn.Module):
-
     def __init__(self,
-                 in_channels: int,
-                 embedding_dim: int,
-                 num_embeddings: int,
+                 in_channels: int = 3,
+                 embedding_dim: int = 64,
+                 num_embeddings: int = 512,
                  hidden_dims: List = None,
                  beta: float = 0.25,
                  pretrained=True,
@@ -379,7 +306,7 @@ class VQVAE(nn.Module):
             resnet = BACKBONES[backbone](weights="DEFAULT")
             modules = list(resnet.children())[:-1]
             self.resnet = nn.Sequential(*modules)
-            in_channels = 2048
+            in_channels = resnet.fc.in_features
 
         modules = []
         if hidden_dims is None:

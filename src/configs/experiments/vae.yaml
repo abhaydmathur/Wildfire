@@ -1,13 +1,13 @@
-trial_name: "vqvae"
-model_name: "vqvae"
+trial_name: "vae"
+model_name: "vae"
 
 data_path: "/data/amathur-23/ROB313"
 
 learning_rate: 0.0001
 batch_size: 32
-epochs: 50
+epochs: 1
 learning_rate_classifier: 0.0001
-epochs_classifier: 20
+epochs_classifier: 1
 early_stopping_patience: 5
 early_stopping_threshold: 0.0001 
 latent_dim: 256
@@ -16,15 +16,12 @@ beta: 1
 log_dir: "./runs"
 model_save_path: "/data/iivanova-23/ROB313/models"
 
-gpu_id: 1
+gpu_id: 2
 seed: 42
 
 test_freq: 5
 pretrained: false
 weight_decay: 0.0001
-train_backbone: true 
-backbone: 'resnet50'
+backbone: 'resnet101'
 
 pretrained_vae_path: ""
-# "/data/iivanova-23/ROB313/models/vqvae_resnet50/vae_model.pth"
-# "/data/iivanova-23/ROB313/models/vae_trial_256_32/vae_model.pth"
